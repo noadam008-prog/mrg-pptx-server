@@ -1,0 +1,19 @@
+{
+  "name": "management-report-pptx-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "PPTX generation API for the Management Report Dify workflow (POST /generate-pptx)",
+  "scripts": {
+    "start": "node pptx-api-server.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "axios": "^1.18.1",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "pptxgenjs": "^4.0.1"
+  }
+}

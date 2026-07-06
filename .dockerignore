@@ -1,0 +1,8 @@
+node_modules
+output
+*.log
+v2resp.json
+test-payload*.json
+mock-monthly-data.json
+waterfall-preview.svg
+pptx-api-server-v2.mjs
