@@ -9,6 +9,7 @@ RUN npm install --omit=dev --no-audit --no-fund
 
 # App source
 COPY pptx-api-server.mjs ./
+COPY public ./public
 
 # Generated decks land here (ephemeral; served immediately via /download)
 RUN mkdir -p /app/output
