@@ -20,7 +20,7 @@ app.use(express.json({ limit: '50mb' }));
 // /health stays open. When RENDER_TOKEN is unset (local use), auth is off.
 const RENDER_TOKEN = process.env.RENDER_TOKEN || '';
 app.use((req, res, next) => {
-  if (!RENDER_TOKEN || req.path === '/health') return next();
+  if (!RENDER_TOKEN || req.path === '/health' || (req.method === 'GET' && req.path === '/')) return next();
   const auth = req.headers.authorization || '';
   if (auth === 'Bearer ' + RENDER_TOKEN || req.query.token === RENDER_TOKEN) return next();
   return res.status(401).json({ success: false, error: 'unauthorized' });
@@ -1319,6 +1319,13 @@ app.get('/download/:filename', (req, res) => {
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Web front end (config + run-workflow UI), served at the root.
+app.get('/', (req, res) => {
+  const page = path.join(__dirname, 'public', 'index.html');
+  if (fs.existsSync(page)) return res.sendFile(page);
+  res.status(404).send('frontend not bundled');
 });
 
 app.listen(PORT, () => {

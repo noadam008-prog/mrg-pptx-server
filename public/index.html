@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>マネジメントレポート生成 | Management Report Generator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --green:#86BC25; --mid-green:#26890D; --deep-green:#046A38; --dark-green:#1C3D26;
+    --pale-green:#F1F6E4; --dark-gray:#222222; --light-gray:#E6E6E6;
+    --cool-6:#A7A8AA; --cool-7:#97999B; --cool-9:#757678; --cool-11:#53565A;
+    --blue-5:#005587; --fail:#C62828; --warn:#D97706; --bg:#F5F5F3;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;}
+  body{background:var(--bg);color:var(--dark-gray);font-family:"Noto Sans JP","DM Sans",-apple-system,sans-serif;font-size:14px;line-height:1.6;}
+  .display{font-family:"DM Sans","Noto Sans JP",sans-serif;}
+  .num{font-family:"DM Sans",sans-serif;font-variant-numeric:tabular-nums;}
+
+  /* header */
+  header{position:sticky;top:0;z-index:50;background:#000;color:#fff;height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 32px;}
+  .brand{display:flex;align-items:center;gap:16px;}
+  .accent{width:4px;height:28px;background:var(--green);border-radius:2px;}
+  .brand .t{font-family:"DM Sans",sans-serif;font-weight:700;font-size:15px;letter-spacing:.02em;}
+  .brand .s{display:block;font-weight:400;font-size:10px;color:var(--cool-6);letter-spacing:.06em;}
+  .hstat{display:flex;align-items:center;gap:24px;font-size:12px;color:var(--cool-6);}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s infinite;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+  main{max-width:900px;margin:0 auto;padding:28px 24px 60px;}
+  .lead{margin-bottom:22px;}
+  .lead h1{font-family:"DM Sans",sans-serif;font-weight:700;font-size:22px;color:var(--dark-green);}
+  .lead p{color:var(--cool-9);font-size:13px;margin-top:4px;}
+
+  .card{background:#fff;border:1px solid var(--light-gray);border-radius:10px;box-shadow:0 1px 2px rgba(0,0,0,.04);margin-bottom:20px;overflow:hidden;}
+  .card-h{display:flex;align-items:center;gap:12px;padding:16px 22px;border-bottom:1px solid var(--light-gray);}
+  .card-h .ic{width:34px;height:34px;border-radius:8px;background:var(--deep-green);color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;flex:none;}
+  .card-h h2{font-family:"DM Sans",sans-serif;font-weight:700;font-size:15px;color:var(--dark-gray);}
+  .card-h span{font-size:11px;color:var(--cool-7);}
+  .card-b{padding:20px 22px;}
+
+  label{display:block;font-size:12px;font-weight:500;color:var(--cool-11);margin-bottom:5px;}
+  input[type=text],input[type=password]{width:100%;padding:11px 13px;border:1px solid var(--light-gray);border-radius:6px;font-family:inherit;font-size:13px;color:var(--dark-gray);background:#fff;}
+  input:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px rgba(134,188,37,.15);}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  @media(max-width:680px){.grid3,.grid2{grid-template-columns:1fr;}}
+  .field{margin-bottom:16px;}
+
+  /* data source rows */
+  .src{border:1px solid var(--light-gray);border-radius:8px;padding:14px 16px;margin-bottom:12px;}
+  .src-top{display:flex;align-items:center;justify-content:space-between;gap:12px;}
+  .src-name{font-weight:500;font-size:13px;}
+  .src-name small{display:block;font-weight:400;color:var(--cool-7);font-size:11px;}
+  .seg{display:inline-flex;background:#F0F1EC;border-radius:6px;padding:3px;gap:2px;}
+  .seg button{border:none;background:transparent;padding:6px 13px;border-radius:4px;font-family:inherit;font-size:12px;font-weight:600;color:var(--cool-9);cursor:pointer;transition:all .15s;}
+  .seg button.on{background:#fff;color:var(--deep-green);box-shadow:0 1px 2px rgba(0,0,0,.08);}
+  .src-body{margin-top:12px;}
+  .default-note{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mid-green);background:var(--pale-green);border:1px solid #DCE9C4;border-radius:6px;padding:9px 12px;}
+  .drop{border:2px dashed var(--light-gray);border-radius:8px;padding:16px;text-align:center;font-size:12px;color:var(--cool-9);cursor:pointer;transition:all .15s;}
+  .drop:hover{border-color:var(--green);background:#FAFBF6;}
+  .drop.has{border-color:var(--deep-green);background:var(--pale-green);color:var(--deep-green);font-weight:600;}
+  .drop input{display:none;}
+
+  details.adv{margin-bottom:20px;}
+  details.adv summary{cursor:pointer;font-size:12px;color:var(--cool-9);padding:8px 2px;list-style:none;display:flex;align-items:center;gap:6px;}
+  details.adv summary::-webkit-details-marker{display:none;}
+  details.adv summary::before{content:"\25B8";transition:transform .15s;}
+  details.adv[open] summary::before{transform:rotate(90deg);}
+
+  .run{width:100%;padding:15px;background:var(--deep-green);color:#fff;border:none;border-radius:8px;font-family:"DM Sans",sans-serif;font-size:15px;font-weight:700;letter-spacing:.02em;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;transition:background .15s;}
+  .run:hover:not(:disabled){background:#035C31;}
+  .run:disabled{background:var(--cool-6);cursor:not-allowed;}
+  .spin{width:16px;height:16px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;}
+  @keyframes sp{to{transform:rotate(360deg)}}
+
+  /* progress steps */
+  .steps{margin-top:16px;display:none;}
+  .steps.show{display:block;}
+  .step{display:flex;align-items:center;gap:12px;padding:8px 0;font-size:13px;color:var(--cool-9);}
+  .step .mk{width:22px;height:22px;border-radius:50%;border:2px solid var(--light-gray);display:flex;align-items:center;justify-content:center;font-size:11px;flex:none;background:#fff;}
+  .step.active{color:var(--dark-gray);font-weight:500;}
+  .step.active .mk{border-color:var(--green);}
+  .step.done{color:var(--mid-green);}
+  .step.done .mk{background:var(--green);border-color:var(--green);color:#fff;}
+  .step.err .mk{border-color:var(--fail);color:var(--fail);}
+  .step.err{color:var(--fail);}
+  .step .msmall{width:8px;height:8px;border:2px solid var(--green);border-top-color:transparent;border-radius:50%;animation:sp .7s linear infinite;}
+
+  .result{display:none;margin-top:8px;border:1px solid #DCE9C4;background:var(--pale-green);border-radius:10px;padding:22px;text-align:center;}
+  .result.show{display:block;animation:fade .4s ease-out;}
+  @keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+  .result .chk{width:48px;height:48px;border-radius:50%;background:var(--green);color:#fff;display:flex;align-items:center;justify-content:center;font-size:24px;margin:0 auto 12px;}
+  .result h3{font-family:"DM Sans",sans-serif;font-weight:700;font-size:16px;color:var(--dark-green);}
+  .result p{font-size:12px;color:var(--cool-9);margin:4px 0 16px;}
+  .dl{display:inline-flex;align-items:center;gap:8px;padding:12px 24px;background:var(--mid-green);color:#fff;border:none;border-radius:7px;font-family:"DM Sans",sans-serif;font-weight:700;font-size:14px;cursor:pointer;text-decoration:none;}
+  .dl:hover{background:#1F6E0A;}
+  .errbox{display:none;margin-top:12px;font-size:13px;color:var(--fail);background:#FDECEC;border:1px solid #F5C2C2;border-radius:7px;padding:12px 14px;}
+  .errbox.show{display:block;}
+  footer{max-width:900px;margin:0 auto;padding:0 24px 40px;font-size:11px;color:var(--cool-7);}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="accent"></div>
+    <div><span class="t">マネジメントレポート生成</span>
+      <span class="s">MANAGEMENT REPORT GENERATOR &middot; POWERED BY DIFY</span></div>
+  </div>
+  <div class="hstat">
+    <span>SAP F.01 &rarr; GPT &rarr; PowerPoint</span>
+    <span style="display:flex;align-items:center;gap:8px;"><span class="dot"></span>稼働中</span>
+  </div>
+</header>
+
+<main>
+  <div class="lead">
+    <h1>月次マネジメントレポートを生成</h1>
+    <p>実績・予算データからAIコメンタリー付きのPowerPointを自動生成します。データはアップロード、または埋め込みのサンプルを使用できます。</p>
+  </div>
+
+  <!-- inputs -->
+  <div class="card">
+    <div class="card-h"><div class="ic">&#9635;</div>
+      <div><h2>レポート設定</h2><span>Company &amp; data sources</span></div></div>
+    <div class="card-b">
+      <div class="grid3">
+        <div class="field"><label>会社名 / Company</label><input type="text" id="company" value="Test Japan K.K."></div>
+        <div class="field"><label>業種 / Industry</label><input type="text" id="industry" value="Luxury Retail"></div>
+        <div class="field"><label>所在地 / Location</label><input type="text" id="location" value="Tokyo, Japan"></div>
+      </div>
+
+      <div id="sources"></div>
+    </div>
+  </div>
+
+  <!-- advanced connection -->
+  <details class="adv">
+    <summary>接続設定 / Connection settings</summary>
+    <div class="card" style="margin-top:10px;">
+      <div class="card-b">
+        <div class="grid2">
+          <div class="field"><label>Dify API Base URL</label><input type="text" id="difyBase" value="https://n8n-dify.avxdjj.easypanel.host/v1"></div>
+          <div class="field"><label>Dify App API Key</label><input type="password" id="difyKey" placeholder="app-xxxxxxxx"></div>
+        </div>
+        <div class="grid2">
+          <div class="field"><label>Render / Download Base URL（PPTXサーバーの公開URL）</label><input type="text" id="renderBase" value="https://unmilted-venally-annamaria.ngrok-free.dev"></div>
+          <div class="field"><label>Render Token（任意・サーバーで RENDER_TOKEN 設定時）</label><input type="password" id="renderToken" value="700a13f475baaea0f0f06a7e75812b85ae12475c28bcd421"></div>
+        </div>
+        <p style="font-size:11px;color:var(--cool-7);margin-top:-6px;">Difyアプリを公開し API キーを発行してください。Render URL はローカルPPTXサーバー(:3456)の公開アドレスです。</p>
+      </div>
+    </div>
+  </details>
+
+  <button class="run" id="run" onclick="run()"><span id="runlabel">PowerPoint を生成</span></button>
+
+  <div class="steps" id="steps"></div>
+  <div class="errbox" id="err"></div>
+  <div class="result" id="result">
+    <div class="chk">&#10003;</div>
+    <h3>レポートが生成されました</h3>
+    <p id="resname"></p>
+    <a class="dl" id="dl" download>&#8681; PowerPoint をダウンロード</a>
+  </div>
+</main>
+<footer>
+  出所：アップロードされた実績・予算ファイル、または埋め込みの SAP F.01 サンプル。生成物は Dify ワークフロー（GPTコメンタリー・カバー画像）と PPTX レンダリングサーバーにより作成されます。
+</footer>
+
+<script>
+const $=id=>document.getElementById(id);
+// ---- embedded default data (base64) ----
+const DEFAULTS = {
+  actuals: {name:'SAP-F01-Export-Format_ACTUAL.csv', mime:'text/csv', b64:'RmluLnN0YXRlbWVudCBwb3MuLFBvc3RpbmcgcGVyaW9kcyAwMDEvMjAyNSB0byAwMDMvMjAyNSxVbm5hbWVkOiAyLFBvc3RpbmcgcGVyaW9kcyAwMDEvMjAyNCB0byAwMDMvMjAyNCxVbm5hbWVkOiA0LCwsLCwNCixDdXJyZW50IFllYXIsJSBvbiBSZXZlbnVlLFByZXZpb3VzIFllYXIsJSBvbiBSZXZlbnVlLCwsLCwNClJFVkVOVUUsLCwsLCwsLCwNClRva3lvIFNob3AgMSwiIDEsNTQyLDg0MCAiLDMzLjU1JSwiIDY3OCw2NzUgIiwzMy4zMiUsLCwsLA0KVG9reW8gU2hvcCAyLCIgMSwzNDIsNjg4ICIsMjkuMTklLCIgNTY3LDE2NSAiLDI3Ljg1JSwsLCwsDQpPc2FrYSBTaG9wIDEsIiAxLDAyNyw5NjcgIiwyMi4zNSUsIiAzNTYsNzg5ICIsMTcuNTIlLCwsLCwNCkUtY29tbWVyZWNlLCIgNjg1LDgxNSAiLDE0LjkxJSwiIDQzNCwwODYgIiwyMS4zMSUsLCwsLA0KVG90YWwgUmV2ZW51ZSw0NTk5MzEwLDEwMC4wMCUsIiAyLDAzNiw3MTUgIiwxMDAuMDAlLCwsLCwNCiwsLCwsLCwsLA0KQ09TVCBPRiBSRVZFTlVFLCwsLCwsLCwsDQpDb3N0IG9mIEdvb2RzIFNvbGQgLSBNYXRlcmlhbHMsODAxOTY0LDE3LjQwJSw1MTU1ODMsMjUuMzAlLCwsLCwNCkNvc3Qgb2YgR29vZHMgU29sZCAtIERpcmVjdCBMYWJvdXIsMCwwLjAwJSwwLDAuMDAlLCwsLCwNClRvdGFsIENvc3Qgb2YgR29vZHMgU29sZCw4MDE5NjQsMTcuNDAlLDUxNTU4MywyNS4zMCUsLCwsLA0KLCwsLCwsLCwsDQpHUk9TUyBQUk9GSVQsMzc5NzM0Niw4Mi42MCUsMTUyMTEzMiw3NC43MCUsLCwsLA0KLCwsLCwsLCwsDQpPUEVSQVRJTkcgRVhQRU5TRVMsLCwsLCwsLCwNCkVtcGxveWVlIEJlbmVmaXRzIEV4cGVuc2UsLCwsLCwsLCwNCiAgU2FsYXJpZXMgYW5kIFdhZ2VzLDUxNTMxLDEuMTAlLDMyNTMyLDEuNjAlLCwsLCwNCiAgQ29udHJpYnV0aW9uIHRvIFByb3ZpZGVudCBGdW5kLDEwMDAwLDAuMjAlLDcwMDAsMC4zMCUsLCwsLA0KICBTdGFmZiBXZWxmYXJlLDUwMDAsMC4xMCUsMzAwMCwwLjEwJSwsLCwsDQpUb3RhbCBFbXBsb3llZSBCZW5lZml0cyw2NjUzMSwxLjQwJSw0MjUzMiwyLjEwJSwsLCwsDQosLCwsLCwsLCwNCk90aGVyIEV4cGVuc2VzLCwsLCwsLCwsDQogIFBvd2VyIGFuZCBGdWVsLDkwMDAsMC4yMCUsNjAwMCwwLjMwJSwsLCwsDQogIFJlbnQsNTc1OSwwLjEwJSw2MDAwLDAuMzAlLCwsLCwNCiAgUmVwYWlycyBhbmQgTWFpbnRlbmFuY2UsNDQwMywwLjEwJSwyNjQ3LDAuMTAlLCwsLCwNCiAgSW5zdXJhbmNlLDQ1MDAsMC4xMCUsMzA4NywwLjIwJSwsLCwsDQogIFJhdGVzIGFuZCBUYXhlcyw1ODEsMC4wMCUsNTAwLDAuMDAlLCwsLCwNCiAgQWR2ZXJ0aXNlbWVudCBhbmQgUHVibGljaXR5LDM4NTAxMSw4LjQwJSwxODAwMDAsOC44MCUsLCwsLA0KICBMZWdhbCBhbmQgUHJvZmVzc2lvbmFsIENoYXJnZXMsMjIwMDAsMC41MCUsMTUwMDAsMC43MCUsLCwsLA0KICBNaXNjZWxsYW5lb3VzIEV4cGVuc2VzLDEwMDAsMC4wMCUsNjg2LDAuMDAlLCwsLCwNCiAgRGVwcmVjaWF0aW9uIGFuZCBBbW9ydGl6YXRpb24sMTAwMDAsMC4yMCUsOTAwMCwwLjQwJSwsLCwsDQpUb3RhbCBPdGhlciBFeHBlbnNlcyw0NDIyNTQsOS42MCUsMjIyOTIwLDEwLjkwJSwsLCwsDQosLCwsLCwsLCwNClRvdGFsIE9wZXJhdGluZyBFeHBlbnNlcyw1MDg3ODUsMTEuMTAlLDI2NTQ1MiwxMy4wMCUsLCwsLA0KLCwsLCwsLCwsDQpQUk9GSVQgRlJPTSBPUEVSQVRJT05TLDMyODg1NjEsNzEuNTAlLDEyNTU2ODAsNjEuNzAlLCwsLCwNCiwsLCwsLCwsLA0KT1RIRVIgSU5DT01FLCwsLCwsLCwsDQpJbnRlcmVzdCBJbmNvbWUsNDAwMCwwLjEwJSwyODAwLDAuMTAlLCwsLCwNCkRpdmlkZW5kIEluY29tZSwwLDAuMDAlLDAsMC4wMCUsLCwsLA0KT3RoZXIgTm9uLU9wZXJhdGluZyBJbmNvbWUsMTkyMywwLjAwJSw5NDAsMC4wMCUsLCwsLA0KVG90YWwgT3RoZXIgSW5jb21lLDU5MjMsMC4xMCUsMzc0MCwwLjIwJSwsLCwsDQosLCwsLCwsLCwNClBST0ZJVCBCRUZPUkUgRklOQU5DRSBDT1NUUywzMjk0NDg0LDcxLjYwJSwxMjU5NDIwLDYxLjgwJSwsLCwsDQosLCwsLCwsLCwNCkZJTkFOQ0UgQ09TVFMsLCwsLCwsLCwNCkludGVyZXN0IEV4cGVuc2UsNDUwMCwwLjEwJSw0NjEwLDAuMjAlLCwsLCwNCkJhbmsgQ2hhcmdlcyw3ODQsMC4wMCUsNjAwLDAuMDAlLCwsLCwNClRvdGFsIEZpbmFuY2UgQ29zdHMsNTI4NCwwLjEwJSw1MjEwLDAuMzAlLCwsLCwNCiwsLCwsLCwsLA0KUFJPRklUIEJFRk9SRSBUQVgsMzI4OTIwMCw3MS41MCUsMTI1NDIxMCw2MS42MCUsLCwsLA0KLCwsLCwsLCwsDQpUYXggRXhwZW5zZSwsLCwsLCwsLA0KQ3VycmVudCBUYXgsMCwwLjAwJSwwLDAuMDAlLCwsLCwNCkRlZmVycmVkIFRheCwwLDAuMDAlLDAsMC4wMCUsLCwsLA0KVG90YWwgVGF4IEV4cGVuc2UsMCwwLjAwJSwwLDAuMDAlLCwsLCwNCiwsLCwsLCwsLA0KUFJPRklUIEFGVEVSIFRBWCwzMjg5MjAwLDcxLjUwJSwxMjU0MjEwLDYxLjYwJSwsLCwsDQo='},
+  budget:  {name:'SAP-F01-Export-Format_BUDGET.csv', mime:'text/csv', b64:'RmluLnN0YXRlbWVudCBwb3MuLFBvc3RpbmcgcGVyaW9kcyAwMDEvMjAyNSB0byAwMDMvMjAyNSwsUG9zdGluZyBwZXJpb2RzIDAwMS8yMDI0IHRvIDAwMy8yMDI0LA0KLEN1cnJlbnQgWWVhciwlIG9uIFJldmVudWUsUHJldmlvdXMgWWVhciwlIG9uIFJldmVudWUNClJFVkVOVUUsLCwsDQpUb2t5byBTaG9wIDEsIjEsNTAwLDAwMCIsMzYuMTQlLCI5MDAsMDAwIiwzNS41NyUNClRva3lvIFNob3AgMiwiMSwyMDAsMDAwIiwyOC45MiUsIjc4MCwwMDAiLDMwLjgzJQ0KT3Nha2EgU2hvcCAxLCI5MDAsMDAwIiwyMS42OSUsIjM1MCwwMDAiLDEzLjgzJQ0KRS1jb21tZXJlY2UsIjU1MCwwMDAiLDEzLjI1JSwiNTAwLDAwMCIsMTkuNzYlDQpUb3RhbCBSZXZlbnVlLDQxNTAwMDAsMTAwLjAwJSwiMiw1MzAsMDAwIiwxMDAuMDAlDQosLCwsDQpDT1NUIE9GIFJFVkVOVUUsLCwsDQpDb3N0IG9mIEdvb2RzIFNvbGQgLSBNYXRlcmlhbHMsOTAyMDAwLDIyLjAwJSw1ODAwMDAsMjMuMjAlDQpDb3N0IG9mIEdvb2RzIFNvbGQgLSBEaXJlY3QgTGFib3VyLDAsMC4wMCUsMCwwLjAwJQ0KVG90YWwgQ29zdCBvZiBHb29kcyBTb2xkLDkwMjAwMCwyMi4wMCUsNTgwMDAwLDIzLjIwJQ0KLCwsLA0KR1JPU1MgUFJPRklULDMyNDgwMDAsNzkuMjAlLDE5NTAwMDAsNzcuODAlDQosLCwsDQpPUEVSQVRJTkcgRVhQRU5TRVMsLCwsDQpFbXBsb3llZSBCZW5lZml0cyBFeHBlbnNlLCwsLA0KICBTYWxhcmllcyBhbmQgV2FnZXMsNTAwMDAsMS4yMCUsMzUwMDAsMS40MCUNCiAgQ29udHJpYnV0aW9uIHRvIFByb3ZpZGVudCBGdW5kLDEwMDAwLDAuMjAlLDcwMDAsMC4zMCUNCiAgU3RhZmYgV2VsZmFyZSw1MDAwLDAuMTAlLDMwMDAsMC4xMCUNClRvdGFsIEVtcGxveWVlIEJlbmVmaXRzLDY1MDAwLDEuNjAlLDQ1MDAwLDEuODAlDQosLCwsDQpPdGhlciBFeHBlbnNlcywsLCwNCiAgUG93ZXIgYW5kIEZ1ZWwsOTAwMCwwLjIwJSw2MDAwLDAuMjAlDQogIFJlbnQsNjAwMCwwLjEwJSw2MDAwLDAuMjAlDQogIFJlcGFpcnMgYW5kIE1haW50ZW5hbmNlLDQwMDAsMC4xMCUsMzAwMCwwLjEwJQ0KICBJbnN1cmFuY2UsNDUwMCwwLjEwJSw0MDAwLDAuMjAlDQogIFJhdGVzIGFuZCBUYXhlcyw3MDAsMC4wMCUsNTAwLDAuMDAlDQogIEFkdmVydGlzZW1lbnQgYW5kIFB1YmxpY2l0eSwzMjUwMDAsNy45MCUsMTgwMDAwLDcuMjAlDQogIExlZ2FsIGFuZCBQcm9mZXNzaW9uYWwgQ2hhcmdlcywyMjAwMCwwLjUwJSwxNTAwMCwwLjYwJQ0KICBNaXNjZWxsYW5lb3VzIEV4cGVuc2VzLDEwMDAsMC4wMCUsODAwLDAuMDAlDQogIERlcHJlY2lhdGlvbiBhbmQgQW1vcnRpemF0aW9uLDEwMDAwLDAuMjAlLDkwMDAsMC40MCUNClRvdGFsIE90aGVyIEV4cGVuc2VzLDM4MjIwMCw5LjMwJSwyMjQzMDAsOC45MCUNCiwsLCwNClRvdGFsIE9wZXJhdGluZyBFeHBlbnNlcyw0NDcyMDAsMTAuOTAlLDI2OTMwMCwxMC43MCUNCiwsLCwNClBST0ZJVCBGUk9NIE9QRVJBVElPTlMsMjgwMDgwMCw2OC4zMCUsMTY4MDcwMCw2Ny4xMCUNCiwsLCwNCk9USEVSIElOQ09NRSwsLCwNCkludGVyZXN0IEluY29tZSw0MDAwLDAuMTAlLDI1MDAsMC4xMCUNCkRpdmlkZW5kIEluY29tZSwwLDAuMDAlLDAsMC4wMCUNCk90aGVyIE5vbi1PcGVyYXRpbmcgSW5jb21lLDIwMDAsMC4wMCUsMTAwMCwwLjAwJQ0KVG90YWwgT3RoZXIgSW5jb21lLDYwMDAsMC4xMCUsMzUwMCwwLjEwJQ0KLCwsLA0KUFJPRklUIEJFRk9SRSBGSU5BTkNFIENPU1RTLDI4MDY4MDAsNjguNTAlLDE2ODQyMDAsNjcuMjAlDQosLCwsDQpGSU5BTkNFIENPU1RTLCwsLA0KSW50ZXJlc3QgRXhwZW5zZSw0NTAwLDAuMTAlLDUwMDAsMC4yMCUNCkJhbmsgQ2hhcmdlcyw3MDAsMC4wMCUsNjAwLDAuMDAlDQpUb3RhbCBGaW5hbmNlIENvc3RzLDUyMDAsMC4xMCUsNTYwMCwwLjIwJQ0KLCwsLA0KUFJPRklUIEJFRk9SRSBUQVgsMjgwMTYwMCw2OC4zMCUsMTY3ODYwMCw2Ny4wMCUNCiwsLCwNClRheCBFeHBlbnNlLCwsLA0KQ3VycmVudCBUYXgsMCwwLjAwJSwwLDAuMDAlDQpEZWZlcnJlZCBUYXgsMCwwLjAwJSwwLDAuMDAlDQpUb3RhbCBUYXggRXhwZW5zZSwwLDAuMDAlLDAsMC4wMCUNCiwsLCwNClBST0ZJVCBBRlRFUiBUQVgsMjgwMTYwMCw2OC4zMCUsMTY3ODYwMCw2Ny4wMCUNCg=='},
+  context: {name:'context.json', mime:'application/json', b64:'ew0KICAiYnVzaW5lc3NfY29udGV4dCI6ICJMdXh1cnkgcmV0YWlsIGNoYWluIGluIEphcGFuIiwNCiAgIm5ld19pbml0aWF0aXZlcyI6ICJPcGVuZWQgR2luemEgZmxhZ3NoaXAgYm91dGlxdWUgRmViIDEsIDIwMjUiLA0KICAiZXh0ZXJuYWxfZmFjdG9ycyI6ICJKUFkgYXQgwqU2NS9VU0QgLSB2ZXJ5IGZhdm9yYWJsZSBmb3IgdG91cmlzdHMiLA0KICAib3BlcmF0aW9uYWxfYWN0aXZpdGllcyI6ICJSdW5uaW5nIHNwcmluZyBzYWxlIDEwLTIwJSBvZmYgRmViLU1hciIsDQogICJzdXBwbHlfY2hhaW5fbm90ZXMiOiAiRGVsYXllZCBzaGlwbWVudCBmcm9tIEl0YWx5IC0gbWluaW1hbCBpbXBhY3QiLA0KICAiVG9reW8gU2hvcCAxIjogIkdpbnphIGZsYWdzaGlwIC0gc3Ryb25nIHRvdXJpc3QgdHJhZmZpYyIsDQogICJUb2t5byBTaG9wIDIiOiAiU2hpYnV5YSBsb2NhdGlvbiAtIHlvdW5nZXIgZGVtb2dyYXBoaWMiDQp9'},
+};
+const SRC_META = [
+  {key:'actuals', label:'実績データ', sub:'Actuals &middot; SAP F.01 CSV'},
+  {key:'budget',  label:'予算データ', sub:'Budget &middot; SAP F.01 CSV'},
+  {key:'context', label:'ビジネスコンテキスト', sub:'Context &middot; JSON（任意の背景情報）'},
+];
+const state = { actuals:{mode:'default',file:null}, budget:{mode:'default',file:null}, context:{mode:'default',file:null} };
+
+function b64ToFile(d){
+  const bin=atob(d.b64); const arr=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);
+  return new File([arr], d.name, {type:d.mime});
+}
+// remember Dify key + urls locally
+for(const k of ['difyKey','difyBase','renderBase','renderToken']){const v=localStorage.getItem('mrg_'+k);if(v)$(k).value=v;$(k).addEventListener('change',e=>localStorage.setItem('mrg_'+k,e.target.value));}
+
+function renderSources(){
+  $('sources').innerHTML = SRC_META.map(m=>`
+    <div class="src">
+      <div class="src-top">
+        <div class="src-name">${m.label}<small>${m.sub}</small></div>
+        <div class="seg">
+          <button id="seg-${m.key}-default" class="${state[m.key].mode==='default'?'on':''}" onclick="setMode('${m.key}','default')">デフォルト</button>
+          <button id="seg-${m.key}-upload" class="${state[m.key].mode==='upload'?'on':''}" onclick="setMode('${m.key}','upload')">アップロード</button>
+        </div>
+      </div>
+      <div class="src-body" id="body-${m.key}"></div>
+    </div>`).join('');
+  SRC_META.forEach(m=>renderBody(m.key));
+}
+function renderBody(key){
+  const el=$('body-'+key);
+  if(state[key].mode==='default'){
+    el.innerHTML=`<div class="default-note">&#10003; 埋め込みサンプルを使用： <b style="margin-left:4px;">${DEFAULTS[key].name}</b></div>`;
+  }else{
+    const f=state[key].file;
+    el.innerHTML=`<label class="drop ${f?'has':''}" id="drop-${key}">
+      ${f?('&#10003; '+f.name):'クリックまたはドロップしてファイルを選択'}
+      <input type="file" accept="${key==='context'?'.json,.txt':'.csv'}" onchange="onFile('${key}',this)"></label>`;
+  }
+}
+function setMode(key,mode){state[key].mode=mode;renderSources();}
+function onFile(key,input){const f=input.files[0];if(f){state[key].file=f;renderBody(key);}}
+
+function fileFor(key){
+  return state[key].mode==='upload' && state[key].file ? state[key].file : b64ToFile(DEFAULTS[key]);
+}
+function readText(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result||''));r.onerror=()=>rej(new Error('ファイル読込失敗'));r.readAsText(file);});}
+
+// ---- progress UI ----
+const STEPS=[['upload','データをアップロード'],['run','ワークフロー実行（GPTコメンタリー・画像生成）'],['render','PowerPoint をレンダリング'],['done','完了']];
+function initSteps(){$('steps').className='steps show';$('steps').innerHTML=STEPS.map(s=>`<div class="step" id="st-${s[0]}"><div class="mk">&#9675;</div><span>${s[1]}</span></div>`).join('');}
+function stepState(id,cls){const el=$('st-'+id);if(!el)return;el.className='step '+cls;const mk=el.querySelector('.mk');if(cls==='active')mk.innerHTML='<div class="msmall"></div>';else if(cls==='done')mk.innerHTML='&#10003;';else if(cls==='err')mk.innerHTML='&times;';}
+
+async function difyUpload(base,key,file){
+  const fd=new FormData();fd.append('file',file);fd.append('user','mrg-web');
+  const r=await fetch(base.replace(/\/+$/,'')+'/files/upload',{method:'POST',headers:{Authorization:'Bearer '+key},body:fd});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok||!d.id)throw new Error('アップロード失敗 ('+(d.message||r.status)+')');
+  return d.id;
+}
+
+async function run(){
+  const btn=$('run');$('result').className='result';$('err').className='errbox';
+  const base=$('difyBase').value.trim(), key=$('difyKey').value.trim(), render=$('renderBase').value.trim().replace(/\/+$/,'');
+  if(!key){showErr('Dify App API キーを入力してください（接続設定）。');return;}
+  if(!$('company').value.trim()){showErr('会社名を入力してください。');return;}
+  btn.disabled=true;$('runlabel').textContent='生成中…';btn.insertAdjacentHTML('afterbegin','<div class="spin" id="rs"></div>');
+  initSteps();
+  try{
+    stepState('upload','active');
+    const ids={};
+    // actuals + budget are uploaded as files; context is sent as TEXT (Dify can't read uploaded JSON reliably)
+    for(const k of ['actuals','budget']) ids[k]=await difyUpload(base,key,fileFor(k));
+    const businessContext=await readText(fileFor('context')).catch(()=>'');
+    stepState('upload','done');stepState('run','active');
+
+    const body={response_mode:'blocking',user:'mrg-web',inputs:{
+      company:$('company').value,industry:$('industry').value,location:$('location').value,
+      business_context:businessContext,
+      actuals:{transfer_method:'local_file',upload_file_id:ids.actuals,type:'document'},
+      budget:{transfer_method:'local_file',upload_file_id:ids.budget,type:'document'},
+    }};
+    const r=await fetch(base.replace(/\/+$/,'')+'/workflows/run',{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json();const wf=d.data||d;
+    if(!r.ok||wf.status==='failed'||!wf.outputs)throw new Error(wf.error||d.message||('ワークフロー失敗 (HTTP '+r.status+')'));
+    stepState('run','done');stepState('render','active');
+
+    let resp=wf.outputs.render_response; if(typeof resp==='string'){try{resp=JSON.parse(resp);}catch(e){}}
+    const filename=(resp&&resp.filename)||('report.pptx');
+    const durl=(resp&&resp.download_url)||('/download/'+encodeURIComponent(filename));
+
+    // fetch the pptx from the render server (via its public URL)
+    const rtok=$('renderToken').value.trim();
+    const dlurl=render+durl+(rtok?((durl.indexOf('?')>=0?'&':'?')+'token='+encodeURIComponent(rtok)):'');
+    const fr=await fetch(dlurl,{headers:{'ngrok-skip-browser-warning':'1'}});
+    if(!fr.ok)throw new Error('PPTX の取得に失敗 (HTTP '+fr.status+') — Render URL とサーバー稼働を確認してください。');
+    const blob=await fr.blob();
+    stepState('render','done');stepState('done','done');
+    const url=URL.createObjectURL(blob);
+    $('dl').href=url;$('dl').download=filename;$('resname').textContent=filename;
+    $('result').className='result show';
+    $('dl').click();
+  }catch(e){
+    ['upload','run','render'].forEach(s=>{const el=$('st-'+s);if(el&&el.className.includes('active'))stepState(s,'err');});
+    showErr(e.message);
+  }finally{
+    btn.disabled=false;$('runlabel').textContent='PowerPoint を生成';const rs=$('rs');if(rs)rs.remove();
+  }
+}
+function showErr(m){$('err').textContent='⚠ '+m;$('err').className='errbox show';}
+
+renderSources();
+</script>
+</body>
+</html>
