@@ -1289,17 +1289,38 @@ app.post('/generate-pptx', async (req, res) => {
 
     console.log(`[OK] wrote ${outPath} (${buf.length} bytes)`);
 
+    // ?return_file=1 — stream the .pptx binary back directly. Dify's HTTP
+    // Request node captures binary responses into its `files` output, so the
+    // deck can be surfaced as a downloadable file on the Dify run page itself
+    // (needed in environments where this server's domain is browser-blocked).
+    const wantFile = req.query.return_file === '1' || req.query.return_file === 'true';
+    if (wantFile) {
+      const asciiName = result.filename.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '');
+      res.set({
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'Content-Disposition': `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(result.filename)}`,
+        'Content-Length': String(buf.length),
+      });
+      return res.send(buf);
+    }
+
     // NOTE: do NOT return pptx_base64 in the response body — a full deck with
     // embedded images is several MB and exceeds Dify's 1 MB HTTP-node response
     // limit. The file is saved to disk and fetchable via download_url; callers
     // that want the bytes can pass ?include_base64=1.
     const wantBase64 = req.query.include_base64 === '1' || req.query.include_base64 === 'true';
+    // Absolute download URL (behind Easypanel's proxy the public scheme/host
+    // arrive in X-Forwarded-*). Include the token so the link works when
+    // clicked as-is — the caller already holds the token to reach this route.
+    const publicBase = process.env.PUBLIC_BASE_URL
+      || `${req.get('x-forwarded-proto') || req.protocol}://${req.get('x-forwarded-host') || req.get('host')}`;
+    const tokenQs = RENDER_TOKEN ? `?token=${encodeURIComponent(RENDER_TOKEN)}` : '';
     res.json({
       success: true,
       filename: result.filename,
       filepath: outPath,
       file_size_bytes: buf.length,
-      download_url: `/download/${encodeURIComponent(result.filename)}`,
+      download_url: `${publicBase}/download/${encodeURIComponent(result.filename)}${tokenQs}`,
       ...(wantBase64 ? { pptx_base64: result.pptx_base64 } : {}),
     });
   } catch (error) {
@@ -1318,7 +1339,7 @@ app.get('/download/:filename', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', version: 'return-file-1', timestamp: new Date().toISOString() });
 });
 
 // Web front end (config + run-workflow UI), served at the root.
