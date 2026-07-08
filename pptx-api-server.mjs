@@ -6,7 +6,6 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { Buffer } from 'buffer';
-import { enhancePptx } from './enhance-pptx.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -461,8 +460,7 @@ async function generatePresentation(config) {
       w: CONFIG.slide2.takeawayBoxW,
       h: CONFIG.slide2.takeawayItemH,
       fill: { color: CONFIG.colors.black },
-      line: { type: 'none' },
-      objectName: 'enh:takeawayLabel'
+      line: { type: 'none' }
     });
 
     slide.addText('Key Takeaways', {
@@ -567,7 +565,6 @@ async function generatePresentation(config) {
     slide.addShape(pptx.ShapeType.rect, {
       x, y: 4.5, w: 2.75, h: 0.92,
       fill: { color: CONFIG.colors.gray50 }, line: { color: 'D1D5DB', width: 1 },
-      objectName: 'enh:kpiTile',
     });
     slide.addShape(pptx.ShapeType.rect, {
       x, y: 4.5, w: 0.05, h: 0.92,
@@ -650,7 +647,6 @@ async function generatePresentation(config) {
       bold: true,
       align: "right",
       valign: "mid",
-      objectName: 'enh:coverTitle',
     });
 
     slide.addShape(pptx.ShapeType.rect, {
@@ -1288,21 +1284,7 @@ app.post('/generate-pptx', async (req, res) => {
     }
 
     const outPath = path.join(OUTPUT_DIR, result.filename);
-    let buf = Buffer.from(result.pptx_base64, 'base64');
-
-    // Optional post-processing: inject raw-DrawingML design effects (gradients,
-    // patterns, glow, soft edge, shadow, reflection, gradient text) into shapes
-    // tagged with an objectName. Lossless — leaves charts/media/etc. untouched.
-    // No-op when `enhancements` is absent, so existing callers are unaffected.
-    const enhancements = body.enhancements || body.enhance || null;
-    if (enhancements) {
-      try {
-        buf = await enhancePptx(buf, enhancements);
-        console.log(`[enhance] applied ${Array.isArray(enhancements) ? enhancements.length : 0} enhancement(s)`);
-      } catch (e) {
-        console.error('[enhance] failed, serving un-enhanced deck:', e.message);
-      }
-    }
+    const buf = Buffer.from(result.pptx_base64, 'base64');
     fs.writeFileSync(outPath, buf);
 
     console.log(`[OK] wrote ${outPath} (${buf.length} bytes)`);
@@ -1339,7 +1321,7 @@ app.post('/generate-pptx', async (req, res) => {
       filepath: outPath,
       file_size_bytes: buf.length,
       download_url: `${publicBase}/download/${encodeURIComponent(result.filename)}${tokenQs}`,
-      ...(wantBase64 ? { pptx_base64: buf.toString('base64') } : {}),
+      ...(wantBase64 ? { pptx_base64: result.pptx_base64 } : {}),
     });
   } catch (error) {
     console.error('Error generating PPTX:', error);
@@ -1357,7 +1339,7 @@ app.get('/download/:filename', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', version: 'enhance-1', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', version: 'return-file-1', timestamp: new Date().toISOString() });
 });
 
 // Web front end (config + run-workflow UI), served at the root.
