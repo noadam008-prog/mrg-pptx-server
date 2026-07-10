@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>マネジメントレポート生成 | Management Report Generator</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,7 +20,7 @@
   .num{font-family:"DM Sans",sans-serif;font-variant-numeric:tabular-nums;}
 
   /* header */
-  header{position:sticky;top:0;z-index:50;background:#000;color:#fff;height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 32px;}
+  header{position:sticky;top:0;z-index:50;background:#000;color:#fff;height:56px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 max(32px,env(safe-area-inset-left)) 0 max(32px,env(safe-area-inset-right));}
   .brand{display:flex;align-items:center;gap:16px;}
   .accent{width:4px;height:28px;background:var(--green);border-radius:2px;}
   .brand .t{font-family:"DM Sans",sans-serif;font-weight:700;font-size:15px;letter-spacing:.02em;}
@@ -52,7 +52,7 @@
 
   /* data source rows */
   .src{border:1px solid var(--light-gray);border-radius:8px;padding:14px 16px;margin-bottom:12px;}
-  .src-top{display:flex;align-items:center;justify-content:space-between;gap:12px;}
+  .src-top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
   .src-name{font-weight:500;font-size:13px;}
   .src-name small{display:block;font-weight:400;color:var(--cool-11);font-size:11px;}
   .seg{display:inline-flex;background:#F0F1EC;border-radius:6px;padding:3px;gap:2px;}
@@ -106,6 +106,25 @@
     .result.show{animation:none;}
   }
   footer{max-width:900px;margin:0 auto;padding:0 24px 40px;font-size:11px;color:var(--cool-11);}
+
+  /* Media adaptations — kept last so they win the cascade at equal specificity. */
+  /* Phones: the pipeline caption yields, spacing tightens, nothing overflows. */
+  @media(max-width:560px){
+    header{padding:0 max(16px,env(safe-area-inset-left)) 0 max(16px,env(safe-area-inset-right));}
+    .hstat .pipe{display:none;}
+    .brand .s{display:none;}
+    main{padding:20px 16px 48px;}
+    .card-h{padding:14px 16px;}
+    .card-b{padding:16px;}
+    footer{padding:0 16px calc(32px + env(safe-area-inset-bottom));}
+  }
+  /* Touch devices: comfortable targets and no iOS focus-zoom, at any width. */
+  @media(pointer:coarse){
+    input[type=text],input[type=password]{padding:13px 14px;font-size:16px;}
+    .seg button{padding:12px 16px;}
+    details.adv summary{padding:14px 2px;}
+    .drop{padding:22px 16px;}
+  }
 </style>
 </head>
 <body>
@@ -116,7 +135,7 @@
       <span class="s">MANAGEMENT REPORT GENERATOR &middot; POWERED BY DIFY</span></div>
   </div>
   <div class="hstat">
-    <span>SAP F.01 &rarr; GPT &rarr; PowerPoint</span>
+    <span class="pipe">SAP F.01 &rarr; GPT &rarr; PowerPoint</span>
     <span style="display:flex;align-items:center;gap:8px;"><span class="dot"></span>稼働中</span>
   </div>
 </header>
