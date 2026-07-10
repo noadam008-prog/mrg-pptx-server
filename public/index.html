@@ -97,8 +97,13 @@
   .result p{font-size:12px;color:var(--cool-9);margin:4px 0 16px;}
   .dl{display:inline-flex;align-items:center;gap:8px;padding:12px 24px;background:var(--mid-green);color:#fff;border:none;border-radius:7px;font-family:"DM Sans",sans-serif;font-weight:700;font-size:14px;cursor:pointer;text-decoration:none;}
   .dl:hover{background:#1F6E0A;}
-  .errbox{display:none;margin-top:12px;font-size:13px;color:var(--fail);background:#FDECEC;border:1px solid #F5C2C2;border-radius:7px;padding:12px 14px;}
+  .errbox{display:none;margin-top:12px;font-size:13px;color:var(--fail);background:#FDECEC;border:1px solid #F5C2C2;border-radius:7px;padding:12px 14px;overflow-wrap:anywhere;}
   .errbox.show{display:block;}
+  .drop,.result p,.default-note{overflow-wrap:anywhere;}
+  @media (prefers-reduced-motion:reduce){
+    .dot{animation:none;}
+    .result.show{animation:none;}
+  }
   footer{max-width:900px;margin:0 auto;padding:0 24px 40px;font-size:11px;color:var(--cool-7);}
 </style>
 </head>
@@ -127,9 +132,9 @@
       <div><h2>レポート設定</h2><span>Company &amp; data sources</span></div></div>
     <div class="card-b">
       <div class="grid3">
-        <div class="field"><label>会社名 / Company</label><input type="text" id="company" value="Test Japan K.K."></div>
-        <div class="field"><label>業種 / Industry</label><input type="text" id="industry" value="Luxury Retail"></div>
-        <div class="field"><label>所在地 / Location</label><input type="text" id="location" value="Tokyo, Japan"></div>
+        <div class="field"><label for="company">会社名 / Company</label><input type="text" id="company" value="Test Japan K.K." maxlength="200"></div>
+        <div class="field"><label for="industry">業種 / Industry</label><input type="text" id="industry" value="Luxury Retail" maxlength="200"></div>
+        <div class="field"><label for="location">所在地 / Location</label><input type="text" id="location" value="Tokyo, Japan" maxlength="200"></div>
       </div>
 
       <div id="sources"></div>
@@ -142,12 +147,12 @@
     <div class="card" style="margin-top:10px;">
       <div class="card-b">
         <div class="grid2">
-          <div class="field"><label>Dify API Base URL</label><input type="text" id="difyBase" value="https://n8n-dify.avxdjj.easypanel.host/v1"></div>
-          <div class="field"><label>Dify App API Key</label><input type="password" id="difyKey" placeholder="app-xxxxxxxx"></div>
+          <div class="field"><label for="difyBase">Dify API Base URL</label><input type="text" id="difyBase" value="https://n8n-dify.avxdjj.easypanel.host/v1"></div>
+          <div class="field"><label for="difyKey">Dify App API Key</label><input type="password" id="difyKey" placeholder="app-xxxxxxxx" autocomplete="off"></div>
         </div>
         <div class="grid2">
-          <div class="field"><label>Render / Download Base URL（PPTXサーバーの公開URL）</label><input type="text" id="renderBase" value="https://unmilted-venally-annamaria.ngrok-free.dev"></div>
-          <div class="field"><label>Render Token（任意・サーバーで RENDER_TOKEN 設定時）</label><input type="password" id="renderToken" value="700a13f475baaea0f0f06a7e75812b85ae12475c28bcd421"></div>
+          <div class="field"><label for="renderBase">Render / Download Base URL（PPTXサーバーの公開URL）</label><input type="text" id="renderBase" placeholder="https://..."></div>
+          <div class="field"><label for="renderToken">Render Token（任意・サーバーで RENDER_TOKEN 設定時）</label><input type="password" id="renderToken" placeholder="サーバー管理者から受け取ったトークン" autocomplete="off"></div>
         </div>
         <p style="font-size:11px;color:var(--cool-7);margin-top:-6px;">Difyアプリを公開し API キーを発行してください。Render URL はローカルPPTXサーバー(:3456)の公開アドレスです。</p>
       </div>
@@ -156,8 +161,8 @@
 
   <button class="run" id="run" onclick="run()"><span id="runlabel">PowerPoint を生成</span></button>
 
-  <div class="steps" id="steps"></div>
-  <div class="errbox" id="err"></div>
+  <div class="steps" id="steps" aria-live="polite"></div>
+  <div class="errbox" id="err" role="alert"></div>
   <div class="result" id="result">
     <div class="chk">&#10003;</div>
     <h3>レポートが生成されました</h3>
@@ -189,8 +194,15 @@ function b64ToFile(d){
   for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);
   return new File([arr], d.name, {type:d.mime});
 }
-// remember Dify key + urls locally
-for(const k of ['difyKey','difyBase','renderBase','renderToken']){const v=localStorage.getItem('mrg_'+k);if(v)$(k).value=v;$(k).addEventListener('change',e=>localStorage.setItem('mrg_'+k,e.target.value));}
+// remember Dify key + urls locally (localStorage can throw in private mode — degrade to session-only)
+const store={get(k){try{return localStorage.getItem('mrg_'+k);}catch(e){return null;}},set(k,v){try{localStorage.setItem('mrg_'+k,v);}catch(e){}}};
+for(const k of ['difyKey','difyBase','renderBase','renderToken']){const v=store.get(k);if(v)$(k).value=v;$(k).addEventListener('change',e=>store.set(k,e.target.value));}
+// Default render base: this page is served BY the render server, so same-origin is
+// correct when on http(s); fall back to the public URL when opened from disk.
+// Also migrate stale saved values that still point at a dead ngrok tunnel.
+const RENDER_FALLBACK='https://pptx-server-pptx-server.avxdjj.easypanel.host';
+const RENDER_DEFAULT=/^https?:$/.test(location.protocol)?location.origin:RENDER_FALLBACK;
+if(!$('renderBase').value.trim()||/ngrok/i.test($('renderBase').value)){$('renderBase').value=RENDER_DEFAULT;store.set('renderBase',RENDER_DEFAULT);}
 
 function renderSources(){
   $('sources').innerHTML = SRC_META.map(m=>`
@@ -198,8 +210,8 @@ function renderSources(){
       <div class="src-top">
         <div class="src-name">${m.label}<small>${m.sub}</small></div>
         <div class="seg">
-          <button id="seg-${m.key}-default" class="${state[m.key].mode==='default'?'on':''}" onclick="setMode('${m.key}','default')">デフォルト</button>
-          <button id="seg-${m.key}-upload" class="${state[m.key].mode==='upload'?'on':''}" onclick="setMode('${m.key}','upload')">アップロード</button>
+          <button id="seg-${m.key}-default" class="${state[m.key].mode==='default'?'on':''}" aria-pressed="${state[m.key].mode==='default'}" onclick="setMode('${m.key}','default')">デフォルト</button>
+          <button id="seg-${m.key}-upload" class="${state[m.key].mode==='upload'?'on':''}" aria-pressed="${state[m.key].mode==='upload'}" onclick="setMode('${m.key}','upload')">アップロード</button>
         </div>
       </div>
       <div class="src-body" id="body-${m.key}"></div>
@@ -218,7 +230,12 @@ function renderBody(key){
   }
 }
 function setMode(key,mode){state[key].mode=mode;renderSources();}
-function onFile(key,input){const f=input.files[0];if(f){state[key].file=f;renderBody(key);}}
+function onFile(key,input){
+  const f=input.files[0];if(!f)return;
+  if(f.size===0){showErr(f.name+' は空のファイルです。別のファイルを選択してください。');input.value='';return;}
+  if(f.size>10*1024*1024){showErr(f.name+' が大きすぎます（10MB上限）。');input.value='';return;}
+  $('err').className='errbox';state[key].file=f;renderBody(key);
+}
 
 function fileFor(key){
   return state[key].mode==='upload' && state[key].file ? state[key].file : b64ToFile(DEFAULTS[key]);
@@ -230,11 +247,29 @@ const STEPS=[['upload','データをアップロード'],['run','ワークフロ
 function initSteps(){$('steps').className='steps show';$('steps').innerHTML=STEPS.map(s=>`<div class="step" id="st-${s[0]}"><div class="mk">&#9675;</div><span>${s[1]}</span></div>`).join('');}
 function stepState(id,cls){const el=$('st-'+id);if(!el)return;el.className='step '+cls;const mk=el.querySelector('.mk');if(cls==='active')mk.innerHTML='<div class="msmall"></div>';else if(cls==='done')mk.innerHTML='&#10003;';else if(cls==='err')mk.innerHTML='&times;';}
 
+// Map HTTP status codes to actionable Japanese messages instead of raw numbers.
+function httpHint(s){
+  if(s===401)return 'API キーが無効です（401）。接続設定の Dify App API Key を確認してください。';
+  if(s===403)return 'アクセスが拒否されました（403）。キーの権限を確認してください。';
+  if(s===404)return 'エンドポイントが見つかりません（404）。Base URL を確認してください。';
+  if(s===429)return 'リクエスト過多です（429）。しばらく待ってから再試行してください。';
+  if(s>=500)return 'サーバー側エラー（'+s+'）。時間をおいて再試行してください。';
+  return null;
+}
+// fetch with timeout + friendly network-failure message
+async function xfetch(url,opts,ms,what){
+  try{
+    return await fetch(url,{...opts,signal:AbortSignal.timeout(ms)});
+  }catch(e){
+    if(e.name==='TimeoutError')throw new Error(what+'がタイムアウトしました（'+Math.round(ms/1000)+'秒）。接続とURLを確認してください。');
+    throw new Error(what+'に接続できません。URL・ネットワーク・サーバー稼働を確認してください。');
+  }
+}
 async function difyUpload(base,key,file){
   const fd=new FormData();fd.append('file',file);fd.append('user','mrg-web');
-  const r=await fetch(base.replace(/\/+$/,'')+'/files/upload',{method:'POST',headers:{Authorization:'Bearer '+key},body:fd});
+  const r=await xfetch(base.replace(/\/+$/,'')+'/files/upload',{method:'POST',headers:{Authorization:'Bearer '+key},body:fd},120000,'ファイルアップロード');
   const d=await r.json().catch(()=>({}));
-  if(!r.ok||!d.id)throw new Error('アップロード失敗 ('+(d.message||r.status)+')');
+  if(!r.ok||!d.id)throw new Error(httpHint(r.status)||('アップロード失敗 ('+(d.message||r.status)+')'));
   return d.id;
 }
 
@@ -243,6 +278,10 @@ async function run(){
   const base=$('difyBase').value.trim(), key=$('difyKey').value.trim(), render=$('renderBase').value.trim().replace(/\/+$/,'');
   if(!key){showErr('Dify App API キーを入力してください（接続設定）。');return;}
   if(!$('company').value.trim()){showErr('会社名を入力してください。');return;}
+  // Upload mode with no file chosen must not silently fall back to the sample.
+  for(const m of SRC_META){
+    if(state[m.key].mode==='upload'&&!state[m.key].file){showErr(m.label+'：アップロードが選択されていますが、ファイルが選ばれていません。ファイルを選択するか「デフォルト」に切り替えてください。');return;}
+  }
   btn.disabled=true;$('runlabel').textContent='生成中…';btn.insertAdjacentHTML('afterbegin','<div class="spin" id="rs"></div>');
   initSteps();
   try{
@@ -259,22 +298,30 @@ async function run(){
       actuals:{transfer_method:'local_file',upload_file_id:ids.actuals,type:'document'},
       budget:{transfer_method:'local_file',upload_file_id:ids.budget,type:'document'},
     }};
-    const r=await fetch(base.replace(/\/+$/,'')+'/workflows/run',{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify(body)});
-    const d=await r.json();const wf=d.data||d;
-    if(!r.ok||wf.status==='failed'||!wf.outputs)throw new Error(wf.error||d.message||('ワークフロー失敗 (HTTP '+r.status+')'));
+    const r=await xfetch(base.replace(/\/+$/,'')+'/workflows/run',{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify(body)},600000,'ワークフロー実行');
+    const d=await r.json().catch(()=>({}));const wf=d.data||d;
+    if(!r.ok||wf.status==='failed'||!wf.outputs)throw new Error(wf.error||d.message||httpHint(r.status)||('ワークフロー失敗 (HTTP '+r.status+')'));
     stepState('run','done');stepState('render','active');
 
     let resp=wf.outputs.render_response; if(typeof resp==='string'){try{resp=JSON.parse(resp);}catch(e){}}
     const filename=(resp&&resp.filename)||('report.pptx');
     const durl=(resp&&resp.download_url)||('/download/'+encodeURIComponent(filename));
 
-    // fetch the pptx from the render server (via its public URL)
+    // fetch the pptx from the render server. Newer servers return an absolute
+    // download_url (token already included) — use it verbatim; only prefix the
+    // configured base for legacy relative paths.
     const rtok=$('renderToken').value.trim();
-    const dlurl=render+durl+(rtok?((durl.indexOf('?')>=0?'&':'?')+'token='+encodeURIComponent(rtok)):'');
-    const fr=await fetch(dlurl,{headers:{'ngrok-skip-browser-warning':'1'}});
-    if(!fr.ok)throw new Error('PPTX の取得に失敗 (HTTP '+fr.status+') — Render URL とサーバー稼働を確認してください。');
+    let dlurl;
+    if(/^https?:\/\//i.test(durl)){
+      dlurl=durl+(rtok&&!/[?&]token=/.test(durl)?((durl.indexOf('?')>=0?'&':'?')+'token='+encodeURIComponent(rtok)):'');
+    }else{
+      dlurl=render+durl+(rtok?((durl.indexOf('?')>=0?'&':'?')+'token='+encodeURIComponent(rtok)):'');
+    }
+    const fr=await xfetch(dlurl,{headers:{'ngrok-skip-browser-warning':'1'}},180000,'PPTX ダウンロード');
+    if(!fr.ok)throw new Error(fr.status===401?'PPTX の取得が拒否されました（401）。Render Token を確認してください。':('PPTX の取得に失敗 (HTTP '+fr.status+') — Render URL とサーバー稼働を確認してください。'));
     const blob=await fr.blob();
     stepState('render','done');stepState('done','done');
+    if($('dl').href&&$('dl').href.startsWith('blob:'))URL.revokeObjectURL($('dl').href);
     const url=URL.createObjectURL(blob);
     $('dl').href=url;$('dl').download=filename;$('resname').textContent=filename;
     $('result').className='result show';
