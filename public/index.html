@@ -6,7 +6,7 @@
 <title>マネジメントレポート生成 | Management Report Generator</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Noto+Sans+JP:wght@400;500;700&family=Noto+Serif+JP:wght@600;700&display=swap" rel="stylesheet">
 <style>
   :root{
     --green:#86BC25; --mid-green:#26890D; --deep-green:#046A38; --dark-green:#1C3D26;
@@ -17,6 +17,7 @@
     --fail:#C62828; --fail-bg:#FDECEC; --fail-border:#F5C2C2;
     --bg:#F5F5F3; --surface-2:#F0F1EC; --hover-tint:#FAFBF6;
     --ease-out:cubic-bezier(0.25,1,0.5,1);
+    --ink-hero:#0D120E; --hero-sub:#B8BFB8; --serif:"Noto Serif JP","Yu Mincho",serif;
   }
   *{margin:0;padding:0;box-sizing:border-box;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;}
   body{background:var(--bg);color:var(--dark-gray);font-family:"Noto Sans JP","DM Sans",-apple-system,sans-serif;font-size:14px;line-height:1.6;}
@@ -25,29 +26,41 @@
   .hero p,footer{text-wrap:pretty;}
   :where(button,a.dl,summary):focus-visible{outline:3px solid var(--green);outline-offset:2px;border-radius:4px;}
 
-  /* committed green band: header + hero share one deep-green surface */
-  header{position:sticky;top:0;z-index:50;background:var(--deep-green);color:#fff;height:56px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 max(32px,env(safe-area-inset-left)) 0 max(32px,env(safe-area-inset-right));}
-  .brand{display:flex;align-items:center;gap:16px;}
-  .accent{width:4px;height:28px;background:var(--green);border-radius:2px;}
-  .brand .t{font-family:"DM Sans",sans-serif;font-weight:700;font-size:15px;letter-spacing:.02em;}
-  .brand .s{display:block;font-weight:400;font-size:10px;color:var(--pale-green-border);letter-spacing:.06em;}
-  .hstat{display:flex;align-items:center;gap:24px;font-size:12px;color:var(--pale-green-border);}
-  .dot{width:8px;height:8px;border-radius:50%;background:var(--cool-7);box-shadow:0 0 0 2px rgba(255,255,255,.85);}
+  /* floating pill nav over a cinematic near-black hero */
+  .pillnav{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:50;display:flex;align-items:center;gap:22px;background:#111;color:#fff;border-radius:999px;padding:10px 12px 10px 22px;box-shadow:0 6px 24px rgba(0,0,0,.35);max-width:calc(100vw - 24px);}
+  .brand{display:flex;align-items:baseline;gap:2px;white-space:nowrap;}
+  .brand .t{font-family:"DM Sans",sans-serif;font-weight:700;font-size:16px;letter-spacing:.01em;}
+  .brand .mark{width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block;margin-left:3px;}
+  .hstat{display:flex;align-items:center;gap:18px;font-size:12px;color:var(--cool-6);}
+  .hstat .stat-pill{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.08);border-radius:999px;padding:7px 14px;white-space:nowrap;}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--cool-7);box-shadow:0 0 0 2px rgba(255,255,255,.35);}
   .dot.on{background:var(--green);animation:pulse 2s infinite;}
   .dot.err{background:var(--fail);}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 
-  .hero{background:var(--deep-green);padding:34px 24px 92px;}
-  .hero-in{max-width:900px;margin:0 auto;}
-  .hero h1{font-family:"DM Sans","Noto Sans JP",sans-serif;font-weight:700;font-size:clamp(24px,2.6vw + 14px,32px);color:#fff;letter-spacing:.01em;word-break:auto-phrase;}
-  .hero p{color:#E6F2E9;font-size:14px;margin-top:8px;max-width:62ch;}
+  .hero{position:relative;background:var(--ink-hero);color:#fff;padding:120px 24px 72px;overflow:hidden;}
+  .hero::after{content:"報";position:absolute;top:-4%;right:-2%;font-family:var(--serif);font-weight:700;font-size:min(48vw,540px);line-height:1;color:rgba(255,255,255,.028);pointer-events:none;user-select:none;}
+  .hero-in{max-width:900px;margin:0 auto;position:relative;}
+  .eyebrow{display:flex;align-items:center;gap:10px;font-size:12px;letter-spacing:.32em;color:var(--cool-6);font-family:"DM Sans",sans-serif;font-weight:500;}
+  .eyebrow::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--green);}
+  .hero h1{font-family:var(--serif);font-weight:700;font-size:clamp(34px,5.4vw,58px);line-height:1.28;letter-spacing:.02em;margin-top:26px;word-break:auto-phrase;}
+  .hero h1 .l2{display:block;color:var(--green);}
+  .hero p{color:var(--hero-sub);font-size:14px;line-height:2;margin-top:26px;max-width:56ch;}
+  .hero-cta{display:inline-flex;align-items:center;gap:10px;margin-top:34px;background:var(--green);color:var(--ink-hero);font-family:"Noto Sans JP",sans-serif;font-weight:700;font-size:14px;padding:15px 28px;border-radius:6px;text-decoration:none;transition:transform .18s var(--ease-out),box-shadow .18s var(--ease-out);}
+  .hero-cta:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(134,188,37,.25);}
+  .hero-cta .ar{transition:transform .18s var(--ease-out);}
+  .hero-cta:hover .ar{transform:translateX(3px);}
+  .hstats{display:flex;gap:64px;flex-wrap:wrap;margin-top:64px;}
+  .hstats .st::before{content:"";display:block;width:34px;height:3px;background:var(--green);margin-bottom:18px;}
+  .hstats .n{font-family:var(--serif);font-weight:700;font-size:38px;color:#fff;line-height:1;}
+  .hstats .l{font-size:12px;color:var(--cool-6);margin-top:10px;}
 
-  main{max-width:900px;margin:-64px auto 0;padding:0 24px 60px;}
+  main{max-width:900px;margin:0 auto;padding:56px 24px 60px;}
 
   .card{background:#fff;border:1px solid var(--light-gray);border-radius:10px;box-shadow:0 2px 10px rgba(28,61,38,.10);margin-bottom:20px;overflow:hidden;}
   .card-h{display:flex;align-items:center;gap:12px;padding:16px 22px;border-bottom:1px solid var(--light-gray);}
   .card-h .ic{width:34px;height:34px;border-radius:8px;background:var(--deep-green);color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;flex:none;}
-  .card-h h2{font-family:"DM Sans",sans-serif;font-weight:700;font-size:15px;color:var(--dark-gray);}
+  .card-h h2{font-family:var(--serif);font-weight:700;font-size:17px;color:var(--dark-gray);letter-spacing:.02em;}
   .card-h span{font-size:11px;color:var(--cool-11);}
   .card-b{padding:20px 22px;}
 
@@ -82,22 +95,22 @@
   details.adv summary::before{content:"\25B8";transition:transform .15s;}
   details.adv[open] summary::before{transform:rotate(90deg);}
 
-  .run{width:100%;padding:15px;background:var(--deep-green);color:#fff;border:none;border-radius:8px;font-family:"DM Sans",sans-serif;font-size:15px;font-weight:700;letter-spacing:.02em;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;transition:background .15s var(--ease-out);}
-  .run:hover:not(:disabled){background:var(--deep-green-hover);}
+  .run{width:100%;padding:17px;background:var(--green);color:var(--ink-hero);border:none;border-radius:8px;font-family:"Noto Sans JP",sans-serif;font-size:15px;font-weight:700;letter-spacing:.04em;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;transition:background .15s var(--ease-out),box-shadow .18s var(--ease-out);}
+  .run:hover:not(:disabled){background:#93C733;box-shadow:0 8px 24px rgba(134,188,37,.30);}
   .run:disabled{background:var(--cool-6);cursor:not-allowed;}
-  .spin{width:16px;height:16px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;}
+  .spin{width:16px;height:16px;border:2px solid rgba(13,18,14,.3);border-top-color:var(--ink-hero);border-radius:50%;animation:sp .7s linear infinite;}
   @keyframes sp{to{transform:rotate(360deg)}}
 
   /* progress steps */
   .steps{margin-top:16px;display:none;}
   .steps.show{display:block;}
   .step{display:flex;align-items:center;gap:12px;padding:8px 0;font-size:13px;color:var(--cool-11);}
-  .step .mk{width:22px;height:22px;border-radius:50%;border:2px solid var(--light-gray);display:flex;align-items:center;justify-content:center;font-size:11px;flex:none;background:#fff;}
+  .step .mk{min-width:34px;font-family:var(--serif);font-weight:700;font-size:19px;color:var(--cool-7);flex:none;display:flex;align-items:center;justify-content:flex-start;}
   .step.active{color:var(--dark-gray);font-weight:500;}
-  .step.active .mk{border-color:var(--green);}
+  .step.active .mk{color:var(--deep-green);}
   .step.done{color:var(--mid-green);}
-  .step.done .mk{background:var(--green);border-color:var(--green);color:#fff;}
-  .step.err .mk{border-color:var(--fail);color:var(--fail);}
+  .step.done .mk{color:var(--mid-green);}
+  .step.err .mk{color:var(--fail);}
   .step.err{color:var(--fail);}
   .step .msmall{width:8px;height:8px;border:2px solid var(--green);border-top-color:transparent;border-radius:50%;animation:sp .7s linear infinite;}
 
@@ -116,19 +129,23 @@
     .dot{animation:none;}
     .result.show{animation:none;}
   }
-  footer{max-width:900px;margin:0 auto;padding:0 24px 40px;font-size:11px;color:var(--cool-11);}
+  footer{background:var(--ink-hero);color:var(--cool-6);font-size:11px;line-height:1.9;padding:36px 24px calc(36px + env(safe-area-inset-bottom));}
+  footer .f-in{max-width:900px;margin:0 auto;}
+  footer .f-brand{font-family:"DM Sans",sans-serif;font-weight:700;font-size:14px;color:#fff;margin-bottom:10px;}
+  footer .f-brand i{font-style:normal;color:var(--green);}
 
   /* Media adaptations — kept last so they win the cascade at equal specificity. */
   /* Phones: the pipeline caption yields, spacing tightens, nothing overflows. */
   @media(max-width:560px){
-    header{padding:0 max(16px,env(safe-area-inset-left)) 0 max(16px,env(safe-area-inset-right));}
+    .pillnav{gap:12px;padding:9px 10px 9px 16px;}
     .hstat .pipe{display:none;}
-    .brand .s{display:none;}
-    .hero{padding:22px 16px 76px;}
-    main{padding:0 16px 48px;}
+    .hero{padding:96px 16px 56px;}
+    .hero p{line-height:1.85;}
+    .hstats{gap:32px;margin-top:44px;}
+    .hstats .n{font-size:30px;}
+    main{padding:40px 16px 48px;}
     .card-h{padding:14px 16px;}
     .card-b{padding:16px;}
-    footer{padding:0 16px calc(32px + env(safe-area-inset-bottom));}
   }
   /* Touch devices: comfortable targets and no iOS focus-zoom, at any width. */
   @media(pointer:coarse){
@@ -140,26 +157,29 @@
 </style>
 </head>
 <body>
-<header>
-  <div class="brand">
-    <div class="accent"></div>
-    <div><span class="t">マネジメントレポート生成</span>
-      <span class="s">MANAGEMENT REPORT GENERATOR &middot; POWERED BY DIFY</span></div>
-  </div>
+<nav class="pillnav" aria-label="サイトヘッダー">
+  <div class="brand"><span class="t">Report Studio</span><span class="mark" aria-hidden="true"></span></div>
   <div class="hstat">
-    <span class="pipe">SAP F.01 &rarr; GPT &rarr; PowerPoint</span>
-    <span style="display:flex;align-items:center;gap:8px;"><span class="dot" id="hdot"></span><span id="hstatus">確認中…</span></span>
+    <span class="pipe">SAP F.01 &rarr; AI &rarr; PowerPoint</span>
+    <span class="stat-pill"><span class="dot" id="hdot"></span><span id="hstatus">確認中…</span></span>
   </div>
-</header>
+</nav>
 
 <div class="hero">
   <div class="hero-in">
-    <h1>月次マネジメントレポートを生成</h1>
-    <p>実績・予算データから、AIコメンタリー付きの PowerPoint レポートを自動生成します。お手持ちのファイルを使うか、まずはサンプルデータでお試しください。</p>
+    <div class="eyebrow">MANAGEMENT REPORT GENERATOR</div>
+    <h1><span class="l1">月次の数字を、</span><span class="l2">経営のことばに変える。</span></h1>
+    <p>実績・予算の SAP F.01 データから、AIコメンタリーとカバービジュアル付きの PowerPoint レポートを自動で仕上げます。お手持ちのファイルでも、サンプルデータでも。</p>
+    <a class="hero-cta" href="#studio">レポートを作成 <span class="ar">&rarr;</span></a>
+    <div class="hstats">
+      <div class="st"><div class="n">4<span style="font-size:20px;">枚</span></div><div class="l">スライド自動構成</div></div>
+      <div class="st"><div class="n">2&ndash;4<span style="font-size:20px;">分</span></div><div class="l">平均生成時間</div></div>
+      <div class="st"><div class="n">SAP F.01</div><div class="l">対応フォーマット</div></div>
+    </div>
   </div>
 </div>
 
-<main>
+<main id="studio">
   <!-- inputs -->
   <div class="card">
     <div class="card-h"><div class="ic">&#9635;</div>
@@ -206,7 +226,10 @@
   </div>
 </main>
 <footer>
-  出所：アップロードされた実績・予算ファイル、またはサンプルの SAP F.01 データ。レポートは AI（コメンタリー・カバー画像の生成）と PPTX 作成サーバーにより自動作成されます。
+  <div class="f-in">
+    <div class="f-brand">Report Studio<i>.</i></div>
+    出所：アップロードされた実績・予算ファイル、またはサンプルの SAP F.01 データ。レポートは AI（コメンタリー・カバー画像の生成）と PPTX 作成サーバーにより自動作成されます。
+  </div>
 </footer>
 
 <script>
@@ -296,7 +319,7 @@ function readText(file){return new Promise((res,rej)=>{const r=new FileReader();
 
 // ---- progress UI ----
 const STEPS=[['upload','データをアップロード中'],['run','AI がコメンタリーと画像を生成中（通常 2〜4 分かかります）'],['render','PowerPoint ファイルを作成中'],['done','完了']];
-function initSteps(){$('steps').className='steps show';$('steps').innerHTML=STEPS.map(s=>`<div class="step" id="st-${s[0]}"><div class="mk">&#9675;</div><span>${s[1]}</span></div>`).join('');}
+function initSteps(){$('steps').className='steps show';$('steps').innerHTML=STEPS.map((s,i)=>`<div class="step" id="st-${s[0]}"><div class="mk">${String(i+1).padStart(2,'0')}</div><span>${s[1]}</span></div>`).join('');}
 function stepState(id,cls){const el=$('st-'+id);if(!el)return;el.className='step '+cls;const mk=el.querySelector('.mk');if(cls==='active')mk.innerHTML='<div class="msmall"></div>';else if(cls==='done')mk.innerHTML='&#10003;';else if(cls==='err')mk.innerHTML='&times;';}
 
 // Map HTTP status codes to actionable Japanese messages instead of raw numbers.
