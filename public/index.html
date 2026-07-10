@@ -123,7 +123,7 @@
 <main>
   <div class="lead">
     <h1>月次マネジメントレポートを生成</h1>
-    <p>実績・予算データからAIコメンタリー付きのPowerPointを自動生成します。データはアップロード、または埋め込みのサンプルを使用できます。</p>
+    <p>実績・予算データから、AIコメンタリー付きの PowerPoint レポートを自動生成します。お手持ちのファイルを使うか、まずはサンプルデータでお試しください。</p>
   </div>
 
   <!-- inputs -->
@@ -132,7 +132,7 @@
       <div><h2>レポート設定</h2><span>Company &amp; data sources</span></div></div>
     <div class="card-b">
       <div class="grid3">
-        <div class="field"><label for="company">会社名 / Company</label><input type="text" id="company" value="Test Japan K.K." maxlength="200"></div>
+        <div class="field"><label for="company">会社名 / Company（必須）</label><input type="text" id="company" value="Test Japan K.K." maxlength="200" required></div>
         <div class="field"><label for="industry">業種 / Industry</label><input type="text" id="industry" value="Luxury Retail" maxlength="200"></div>
         <div class="field"><label for="location">所在地 / Location</label><input type="text" id="location" value="Tokyo, Japan" maxlength="200"></div>
       </div>
@@ -154,7 +154,7 @@
           <div class="field"><label for="renderBase">Render / Download Base URL（PPTXサーバーの公開URL）</label><input type="text" id="renderBase" placeholder="https://..."></div>
           <div class="field"><label for="renderToken">Render Token（任意・サーバーで RENDER_TOKEN 設定時）</label><input type="password" id="renderToken" placeholder="サーバー管理者から受け取ったトークン" autocomplete="off"></div>
         </div>
-        <p style="font-size:11px;color:var(--cool-7);margin-top:-6px;">Difyアプリを公開し API キーを発行してください。Render URL はローカルPPTXサーバー(:3456)の公開アドレスです。</p>
+        <p style="font-size:11px;color:var(--cool-11);margin-top:-6px;">Dify でアプリを公開して API キー（app-…）を発行し、上に貼り付けてください。Render URL は通常このページと同じアドレスのため自動設定されます。Render Token はサーバー管理者から受け取ってください。入力内容はこのブラウザにのみ保存されます。</p>
       </div>
     </div>
   </details>
@@ -165,9 +165,10 @@
   <div class="errbox" id="err" role="alert"></div>
   <div class="result" id="result">
     <div class="chk">&#10003;</div>
-    <h3>レポートが生成されました</h3>
+    <h3>レポートが完成しました</h3>
     <p id="resname"></p>
     <a class="dl" id="dl" download>&#8681; PowerPoint をダウンロード</a>
+    <p style="margin:10px 0 0;">ダウンロードは自動で始まります。始まらない場合は上のボタンを押してください。</p>
   </div>
 </main>
 <footer>
@@ -210,8 +211,8 @@ function renderSources(){
       <div class="src-top">
         <div class="src-name">${m.label}<small>${m.sub}</small></div>
         <div class="seg">
-          <button id="seg-${m.key}-default" class="${state[m.key].mode==='default'?'on':''}" aria-pressed="${state[m.key].mode==='default'}" onclick="setMode('${m.key}','default')">デフォルト</button>
-          <button id="seg-${m.key}-upload" class="${state[m.key].mode==='upload'?'on':''}" aria-pressed="${state[m.key].mode==='upload'}" onclick="setMode('${m.key}','upload')">アップロード</button>
+          <button id="seg-${m.key}-default" class="${state[m.key].mode==='default'?'on':''}" aria-pressed="${state[m.key].mode==='default'}" onclick="setMode('${m.key}','default')">サンプルを使う</button>
+          <button id="seg-${m.key}-upload" class="${state[m.key].mode==='upload'?'on':''}" aria-pressed="${state[m.key].mode==='upload'}" onclick="setMode('${m.key}','upload')">自分のファイル</button>
         </div>
       </div>
       <div class="src-body" id="body-${m.key}"></div>
@@ -221,11 +222,12 @@ function renderSources(){
 function renderBody(key){
   const el=$('body-'+key);
   if(state[key].mode==='default'){
-    el.innerHTML=`<div class="default-note">&#10003; 埋め込みサンプルを使用： <b style="margin-left:4px;">${DEFAULTS[key].name}</b></div>`;
+    el.innerHTML=`<div class="default-note">&#10003; サンプルデータを使用： <b style="margin-left:4px;">${DEFAULTS[key].name}</b></div>`;
   }else{
     const f=state[key].file;
+    const kind=key==='context'?'JSON / TXT':'CSV';
     el.innerHTML=`<label class="drop ${f?'has':''}" id="drop-${key}">
-      ${f?('&#10003; '+f.name):'クリックまたはドロップしてファイルを選択'}
+      ${f?('&#10003; '+f.name+' を使用します'):(kind+' ファイルをクリックで選択、またはここにドロップ')}
       <input type="file" accept="${key==='context'?'.json,.txt':'.csv'}" onchange="onFile('${key}',this)"></label>`;
   }
 }
@@ -243,7 +245,7 @@ function fileFor(key){
 function readText(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result||''));r.onerror=()=>rej(new Error('ファイル読込失敗'));r.readAsText(file);});}
 
 // ---- progress UI ----
-const STEPS=[['upload','データをアップロード'],['run','ワークフロー実行（GPTコメンタリー・画像生成）'],['render','PowerPoint をレンダリング'],['done','完了']];
+const STEPS=[['upload','データをアップロード中'],['run','AI がコメンタリーと画像を生成中（通常 2〜4 分かかります）'],['render','PowerPoint ファイルを作成中'],['done','完了']];
 function initSteps(){$('steps').className='steps show';$('steps').innerHTML=STEPS.map(s=>`<div class="step" id="st-${s[0]}"><div class="mk">&#9675;</div><span>${s[1]}</span></div>`).join('');}
 function stepState(id,cls){const el=$('st-'+id);if(!el)return;el.className='step '+cls;const mk=el.querySelector('.mk');if(cls==='active')mk.innerHTML='<div class="msmall"></div>';else if(cls==='done')mk.innerHTML='&#10003;';else if(cls==='err')mk.innerHTML='&times;';}
 
