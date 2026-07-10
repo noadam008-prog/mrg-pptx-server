@@ -22,27 +22,29 @@
   body{background:var(--bg);color:var(--dark-gray);font-family:"Noto Sans JP","DM Sans",-apple-system,sans-serif;font-size:14px;line-height:1.6;}
   .display{font-family:"DM Sans","Noto Sans JP",sans-serif;}
   h1,h2,h3{text-wrap:balance;}
-  .lead p,footer{text-wrap:pretty;}
+  .hero p,footer{text-wrap:pretty;}
   :where(button,a.dl,summary):focus-visible{outline:3px solid var(--green);outline-offset:2px;border-radius:4px;}
 
-  /* header */
-  header{position:sticky;top:0;z-index:50;background:#000;color:#fff;height:56px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 max(32px,env(safe-area-inset-left)) 0 max(32px,env(safe-area-inset-right));}
+  /* committed green band: header + hero share one deep-green surface */
+  header{position:sticky;top:0;z-index:50;background:var(--deep-green);color:#fff;height:56px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 max(32px,env(safe-area-inset-left)) 0 max(32px,env(safe-area-inset-right));}
   .brand{display:flex;align-items:center;gap:16px;}
   .accent{width:4px;height:28px;background:var(--green);border-radius:2px;}
   .brand .t{font-family:"DM Sans",sans-serif;font-weight:700;font-size:15px;letter-spacing:.02em;}
-  .brand .s{display:block;font-weight:400;font-size:10px;color:var(--cool-6);letter-spacing:.06em;}
-  .hstat{display:flex;align-items:center;gap:24px;font-size:12px;color:var(--cool-6);}
-  .dot{width:8px;height:8px;border-radius:50%;background:var(--cool-7);}
+  .brand .s{display:block;font-weight:400;font-size:10px;color:var(--pale-green-border);letter-spacing:.06em;}
+  .hstat{display:flex;align-items:center;gap:24px;font-size:12px;color:var(--pale-green-border);}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--cool-7);box-shadow:0 0 0 2px rgba(255,255,255,.85);}
   .dot.on{background:var(--green);animation:pulse 2s infinite;}
   .dot.err{background:var(--fail);}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 
-  main{max-width:900px;margin:0 auto;padding:28px 24px 60px;}
-  .lead{margin-bottom:22px;}
-  .lead h1{font-family:"DM Sans",sans-serif;font-weight:700;font-size:22px;color:var(--dark-green);}
-  .lead p{color:var(--cool-11);font-size:13px;margin-top:4px;}
+  .hero{background:var(--deep-green);padding:34px 24px 92px;}
+  .hero-in{max-width:900px;margin:0 auto;}
+  .hero h1{font-family:"DM Sans","Noto Sans JP",sans-serif;font-weight:700;font-size:clamp(24px,2.6vw + 14px,32px);color:#fff;letter-spacing:.01em;word-break:auto-phrase;}
+  .hero p{color:#E6F2E9;font-size:14px;margin-top:8px;max-width:62ch;}
 
-  .card{background:#fff;border:1px solid var(--light-gray);border-radius:10px;box-shadow:0 1px 2px rgba(0,0,0,.04);margin-bottom:20px;overflow:hidden;}
+  main{max-width:900px;margin:-64px auto 0;padding:0 24px 60px;}
+
+  .card{background:#fff;border:1px solid var(--light-gray);border-radius:10px;box-shadow:0 2px 10px rgba(28,61,38,.10);margin-bottom:20px;overflow:hidden;}
   .card-h{display:flex;align-items:center;gap:12px;padding:16px 22px;border-bottom:1px solid var(--light-gray);}
   .card-h .ic{width:34px;height:34px;border-radius:8px;background:var(--deep-green);color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;flex:none;}
   .card-h h2{font-family:"DM Sans",sans-serif;font-weight:700;font-size:15px;color:var(--dark-gray);}
@@ -122,7 +124,8 @@
     header{padding:0 max(16px,env(safe-area-inset-left)) 0 max(16px,env(safe-area-inset-right));}
     .hstat .pipe{display:none;}
     .brand .s{display:none;}
-    main{padding:20px 16px 48px;}
+    .hero{padding:22px 16px 76px;}
+    main{padding:0 16px 48px;}
     .card-h{padding:14px 16px;}
     .card-b{padding:16px;}
     footer{padding:0 16px calc(32px + env(safe-area-inset-bottom));}
@@ -149,12 +152,14 @@
   </div>
 </header>
 
-<main>
-  <div class="lead">
+<div class="hero">
+  <div class="hero-in">
     <h1>月次マネジメントレポートを生成</h1>
     <p>実績・予算データから、AIコメンタリー付きの PowerPoint レポートを自動生成します。お手持ちのファイルを使うか、まずはサンプルデータでお試しください。</p>
   </div>
+</div>
 
+<main>
   <!-- inputs -->
   <div class="card">
     <div class="card-h"><div class="ic">&#9635;</div>
