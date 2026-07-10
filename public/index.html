@@ -10,14 +10,20 @@
 <style>
   :root{
     --green:#86BC25; --mid-green:#26890D; --deep-green:#046A38; --dark-green:#1C3D26;
-    --pale-green:#F1F6E4; --dark-gray:#222222; --light-gray:#E6E6E6;
+    --deep-green-hover:#035C31; --mid-green-hover:#1F6E0A;
+    --pale-green:#F1F6E4; --pale-green-border:#DCE9C4;
+    --dark-gray:#222222; --light-gray:#E6E6E6;
     --cool-6:#A7A8AA; --cool-7:#97999B; --cool-9:#757678; --cool-11:#53565A;
-    --blue-5:#005587; --fail:#C62828; --warn:#D97706; --bg:#F5F5F3;
+    --fail:#C62828; --fail-bg:#FDECEC; --fail-border:#F5C2C2;
+    --bg:#F5F5F3; --surface-2:#F0F1EC; --hover-tint:#FAFBF6;
+    --ease-out:cubic-bezier(0.25,1,0.5,1);
   }
   *{margin:0;padding:0;box-sizing:border-box;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;}
   body{background:var(--bg);color:var(--dark-gray);font-family:"Noto Sans JP","DM Sans",-apple-system,sans-serif;font-size:14px;line-height:1.6;}
   .display{font-family:"DM Sans","Noto Sans JP",sans-serif;}
-  .num{font-family:"DM Sans",sans-serif;font-variant-numeric:tabular-nums;}
+  h1,h2,h3{text-wrap:balance;}
+  .lead p,footer{text-wrap:pretty;}
+  :where(button,a.dl,summary):focus-visible{outline:3px solid var(--green);outline-offset:2px;border-radius:4px;}
 
   /* header */
   header{position:sticky;top:0;z-index:50;background:#000;color:#fff;height:56px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 max(32px,env(safe-area-inset-left)) 0 max(32px,env(safe-area-inset-right));}
@@ -26,7 +32,9 @@
   .brand .t{font-family:"DM Sans",sans-serif;font-weight:700;font-size:15px;letter-spacing:.02em;}
   .brand .s{display:block;font-weight:400;font-size:10px;color:var(--cool-6);letter-spacing:.06em;}
   .hstat{display:flex;align-items:center;gap:24px;font-size:12px;color:var(--cool-6);}
-  .dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s infinite;}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--cool-7);}
+  .dot.on{background:var(--green);animation:pulse 2s infinite;}
+  .dot.err{background:var(--fail);}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 
   main{max-width:900px;margin:0 auto;padding:28px 24px 60px;}
@@ -55,13 +63,14 @@
   .src-top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
   .src-name{font-weight:500;font-size:13px;}
   .src-name small{display:block;font-weight:400;color:var(--cool-11);font-size:11px;}
-  .seg{display:inline-flex;background:#F0F1EC;border-radius:6px;padding:3px;gap:2px;}
-  .seg button{border:none;background:transparent;padding:6px 13px;border-radius:4px;font-family:inherit;font-size:12px;font-weight:600;color:var(--cool-11);cursor:pointer;transition:all .15s;}
+  .seg{display:inline-flex;background:var(--surface-2);border-radius:6px;padding:3px;gap:2px;}
+  .seg button{border:none;background:transparent;padding:6px 13px;border-radius:4px;font-family:inherit;font-size:12px;font-weight:600;color:var(--cool-11);cursor:pointer;transition:color .15s var(--ease-out),background .15s var(--ease-out);}
+  .seg button:not(.on):hover{color:var(--dark-gray);background:rgba(255,255,255,.55);}
   .seg button.on{background:#fff;color:var(--deep-green);box-shadow:0 1px 2px rgba(0,0,0,.08);}
   .src-body{margin-top:12px;}
-  .default-note{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--deep-green);background:var(--pale-green);border:1px solid #DCE9C4;border-radius:6px;padding:9px 12px;}
-  .drop{border:2px dashed var(--light-gray);border-radius:8px;padding:16px;text-align:center;font-size:12px;color:var(--cool-9);cursor:pointer;transition:all .15s;}
-  .drop:hover{border-color:var(--green);background:#FAFBF6;}
+  .default-note{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--deep-green);background:var(--pale-green);border:1px solid var(--pale-green-border);border-radius:6px;padding:9px 12px;}
+  .drop{border:2px dashed var(--light-gray);border-radius:8px;padding:16px;text-align:center;font-size:12px;color:var(--cool-9);cursor:pointer;transition:border-color .15s var(--ease-out),background .15s var(--ease-out);}
+  .drop:hover{border-color:var(--green);background:var(--hover-tint);}
   .drop.has{border-color:var(--deep-green);background:var(--pale-green);color:var(--deep-green);font-weight:600;}
   .drop input{display:none;}
 
@@ -71,8 +80,8 @@
   details.adv summary::before{content:"\25B8";transition:transform .15s;}
   details.adv[open] summary::before{transform:rotate(90deg);}
 
-  .run{width:100%;padding:15px;background:var(--deep-green);color:#fff;border:none;border-radius:8px;font-family:"DM Sans",sans-serif;font-size:15px;font-weight:700;letter-spacing:.02em;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;transition:background .15s;}
-  .run:hover:not(:disabled){background:#035C31;}
+  .run{width:100%;padding:15px;background:var(--deep-green);color:#fff;border:none;border-radius:8px;font-family:"DM Sans",sans-serif;font-size:15px;font-weight:700;letter-spacing:.02em;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;transition:background .15s var(--ease-out);}
+  .run:hover:not(:disabled){background:var(--deep-green-hover);}
   .run:disabled{background:var(--cool-6);cursor:not-allowed;}
   .spin{width:16px;height:16px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;}
   @keyframes sp{to{transform:rotate(360deg)}}
@@ -90,15 +99,15 @@
   .step.err{color:var(--fail);}
   .step .msmall{width:8px;height:8px;border:2px solid var(--green);border-top-color:transparent;border-radius:50%;animation:sp .7s linear infinite;}
 
-  .result{display:none;margin-top:8px;border:1px solid #DCE9C4;background:var(--pale-green);border-radius:10px;padding:22px;text-align:center;}
+  .result{display:none;margin-top:8px;border:1px solid var(--pale-green-border);background:var(--pale-green);border-radius:10px;padding:22px;text-align:center;}
   .result.show{display:block;animation:fade .4s ease-out;}
   @keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
   .result .chk{width:48px;height:48px;border-radius:50%;background:var(--green);color:#fff;display:flex;align-items:center;justify-content:center;font-size:24px;margin:0 auto 12px;}
   .result h3{font-family:"DM Sans",sans-serif;font-weight:700;font-size:16px;color:var(--dark-green);}
   .result p{font-size:12px;color:var(--deep-green);margin:4px 0 16px;}
   .dl{display:inline-flex;align-items:center;gap:8px;padding:12px 24px;background:var(--mid-green);color:#fff;border:none;border-radius:7px;font-family:"DM Sans",sans-serif;font-weight:700;font-size:14px;cursor:pointer;text-decoration:none;}
-  .dl:hover{background:#1F6E0A;}
-  .errbox{display:none;margin-top:12px;font-size:13px;color:var(--fail);background:#FDECEC;border:1px solid #F5C2C2;border-radius:7px;padding:12px 14px;overflow-wrap:anywhere;}
+  .dl:hover{background:var(--mid-green-hover);}
+  .errbox{display:none;margin-top:12px;font-size:13px;color:var(--fail);background:var(--fail-bg);border:1px solid var(--fail-border);border-radius:7px;padding:12px 14px;overflow-wrap:anywhere;}
   .errbox.show{display:block;}
   .drop,.result p,.default-note{overflow-wrap:anywhere;}
   @media (prefers-reduced-motion:reduce){
@@ -136,7 +145,7 @@
   </div>
   <div class="hstat">
     <span class="pipe">SAP F.01 &rarr; GPT &rarr; PowerPoint</span>
-    <span style="display:flex;align-items:center;gap:8px;"><span class="dot"></span>稼働中</span>
+    <span style="display:flex;align-items:center;gap:8px;"><span class="dot" id="hdot"></span><span id="hstatus">確認中…</span></span>
   </div>
 </header>
 
@@ -224,6 +233,22 @@ for(const k of ['difyKey','difyBase','renderBase','renderToken']){const v=store.
 const RENDER_FALLBACK='https://pptx-server-pptx-server.avxdjj.easypanel.host';
 const RENDER_DEFAULT=/^https?:$/.test(location.protocol)?location.origin:RENDER_FALLBACK;
 if(!$('renderBase').value.trim()||/ngrok/i.test($('renderBase').value)){$('renderBase').value=RENDER_DEFAULT;store.set('renderBase',RENDER_DEFAULT);}
+
+// Header status reflects a real /health check of the render server — never a
+// decorative pulse. Re-checked when the Render URL setting changes.
+async function checkHealth(){
+  const dot=$('hdot'),txt=$('hstatus');
+  dot.className='dot';txt.textContent='確認中…';
+  const base=$('renderBase').value.trim().replace(/\/+$/,'');
+  try{
+    const r=await fetch(base+'/health',{signal:AbortSignal.timeout(6000)});
+    const d=await r.json();
+    if(r.ok&&d.status==='ok'){dot.className='dot on';txt.textContent='稼働中';return;}
+    throw 0;
+  }catch(e){dot.className='dot err';txt.textContent='サーバー未接続';}
+}
+$('renderBase').addEventListener('change',checkHealth);
+checkHealth();
 
 function renderSources(){
   $('sources').innerHTML = SRC_META.map(m=>`
