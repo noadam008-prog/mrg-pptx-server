@@ -4,6 +4,7 @@ import PptxGenJS from 'pptxgenjs';
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { Buffer } from 'buffer';
 
@@ -18,9 +19,12 @@ app.use(express.json({ limit: '50mb' }));
 // server is publicly reachable, e.g. on Easypanel), /generate-pptx and
 // /download require it — via `Authorization: Bearer <token>` or `?token=`.
 // /health stays open. When RENDER_TOKEN is unset (local use), auth is off.
+// GET /d/<id>/<file> download links are open too: the 128-bit random id is the
+// capability, so the master token never ends up in a link shown to users.
 const RENDER_TOKEN = process.env.RENDER_TOKEN || '';
 app.use((req, res, next) => {
   if (!RENDER_TOKEN || req.path === '/health' || (req.method === 'GET' && req.path === '/')) return next();
+  if (req.method === 'GET' && req.path.startsWith('/d/')) return next();
   const auth = req.headers.authorization || '';
   if (auth === 'Bearer ' + RENDER_TOKEN || req.query.token === RENDER_TOKEN) return next();
   return res.status(401).json({ success: false, error: 'unauthorized' });
@@ -33,6 +37,23 @@ const OUTPUT_DIR = path.join(__dirname, 'output');
 if (!fs.existsSync(OUTPUT_DIR)) {
   fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 }
+
+// Per-run download links (?link=1): each deck goes to output/dl/<random id>/<filename>
+// and expires after DOWNLOAD_TTL_HOURS. Separate folders also stop two runs for the
+// same company from overwriting each other's file.
+const DOWNLOAD_DIR = path.join(OUTPUT_DIR, 'dl');
+const DOWNLOAD_TTL_MS = Number(process.env.DOWNLOAD_TTL_HOURS || 24) * 3600 * 1000;
+fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
+
+function purgeExpiredDownloads() {
+  for (const id of fs.readdirSync(DOWNLOAD_DIR)) {
+    const dir = path.join(DOWNLOAD_DIR, id);
+    try {
+      if (Date.now() - fs.statSync(dir).mtimeMs > DOWNLOAD_TTL_MS) fs.rmSync(dir, { recursive: true, force: true });
+    } catch { /* already gone */ }
+  }
+}
+setInterval(purgeExpiredDownloads, 3600 * 1000).unref();
 
 
 // ============================================================================
@@ -1283,8 +1304,30 @@ app.post('/generate-pptx', async (req, res) => {
       throw new Error('Generator returned empty result (missing filename or pptx_base64).');
     }
 
-    const outPath = path.join(OUTPUT_DIR, result.filename);
     const buf = Buffer.from(result.pptx_base64, 'base64');
+    const publicBase = process.env.PUBLIC_BASE_URL
+      || `${req.get('x-forwarded-proto') || req.protocol}://${req.get('x-forwarded-host') || req.get('host')}`;
+
+    // ?link=1 — save under a random id and return an expiring download link
+    // that works without the render token (used by the n8n workflow).
+    const wantLink = req.query.link === '1' || req.query.link === 'true';
+    if (wantLink) {
+      const id = crypto.randomBytes(16).toString('hex');
+      const dir = path.join(DOWNLOAD_DIR, id);
+      fs.mkdirSync(dir, { recursive: true });
+      const filename = path.basename(result.filename);
+      fs.writeFileSync(path.join(dir, filename), buf);
+      console.log(`[OK] wrote dl/${id}/${filename} (${buf.length} bytes)`);
+      return res.json({
+        success: true,
+        filename,
+        file_size_bytes: buf.length,
+        download_url: `${publicBase.replace(/\/$/, '')}/d/${id}/${encodeURIComponent(filename)}`,
+        expires_at: new Date(Date.now() + DOWNLOAD_TTL_MS).toISOString(),
+      });
+    }
+
+    const outPath = path.join(OUTPUT_DIR, result.filename);
     fs.writeFileSync(outPath, buf);
 
     console.log(`[OK] wrote ${outPath} (${buf.length} bytes)`);
@@ -1312,8 +1355,6 @@ app.post('/generate-pptx', async (req, res) => {
     // Absolute download URL (behind Easypanel's proxy the public scheme/host
     // arrive in X-Forwarded-*). Include the token so the link works when
     // clicked as-is — the caller already holds the token to reach this route.
-    const publicBase = process.env.PUBLIC_BASE_URL
-      || `${req.get('x-forwarded-proto') || req.protocol}://${req.get('x-forwarded-host') || req.get('host')}`;
     const tokenQs = RENDER_TOKEN ? `?token=${encodeURIComponent(RENDER_TOKEN)}` : '';
     res.json({
       success: true,
@@ -1338,8 +1379,18 @@ app.get('/download/:filename', (req, res) => {
   }
 });
 
+app.get('/d/:id/:filename', (req, res) => {
+  if (!/^[a-f0-9]{32}$/.test(req.params.id)) return res.status(404).json({ error: 'File not found' });
+  const dir = path.join(DOWNLOAD_DIR, req.params.id);
+  const filepath = path.join(dir, path.basename(req.params.filename));
+  if (!fs.existsSync(filepath) || Date.now() - fs.statSync(dir).mtimeMs > DOWNLOAD_TTL_MS) {
+    return res.status(404).json({ error: 'File not found or link expired' });
+  }
+  res.download(filepath, path.basename(filepath));
+});
+
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', version: 'return-file-1', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', version: 'download-link-1', timestamp: new Date().toISOString() });
 });
 
 // Web front end (config + run-workflow UI), served at the root.
