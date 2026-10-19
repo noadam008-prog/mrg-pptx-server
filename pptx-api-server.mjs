@@ -170,6 +170,94 @@ function normalizeFinancialData(raw) {
 }
 
 // ============================================================================
+// NATIVE P&L WATERFALL (slide 2)
+// One stacked-column chart: an invisible spacer series lifts the floating bars.
+// Bridge per period: Revenue -> COGS -> Gross Profit -> OPEX -> Other, net -> Net Income,
+// where "Other, net" = Net Income - (Gross Profit - OPEX) so the bridge always closes
+// (other income - finance costs - tax).
+// ============================================================================
+
+const WATERFALL_SPACER = '(spacer)';
+
+function buildWaterfallSeries(d, periods) {
+  const steps = [];
+  for (const p of periods) {
+    const v = (m) => toNum(d?.[m]?.[p.key] ?? 0);
+    const revenue = v('revenue');
+    const grossProfit = v('gross_profit') || (revenue - v('cogs'));
+    const cogs = revenue - grossProfit;
+    const opex = v('operating_expenses');
+    const netIncome = v('profit_after_tax');
+    const other = netIncome - (grossProfit - opex);
+    steps.push(
+      { label: 'Revenue', period: p.label, kind: 'total', value: revenue },
+      { label: 'COGS', period: p.label, kind: 'delta', value: -cogs },
+      { label: 'Gross Profit', period: p.label, kind: 'total', value: grossProfit },
+      { label: 'OPEX', period: p.label, kind: 'delta', value: -opex },
+      { label: 'Other, net', period: p.label, kind: 'delta', value: other },
+      { label: 'Net Income', period: p.label, kind: 'total', value: netIncome },
+    );
+  }
+
+  const spacer = [], total = [], increase = [], decrease = [];
+  let running = 0;
+  for (const s of steps) {
+    if (s.kind === 'total') {
+      running = s.value;
+      spacer.push(0); total.push(s.value); increase.push(0); decrease.push(0);
+    } else {
+      const next = running + s.value;
+      spacer.push(Math.min(running, next));
+      total.push(0);
+      increase.push(s.value > 0 ? s.value : 0);
+      decrease.push(s.value < 0 ? -s.value : 0);
+      running = next;
+    }
+  }
+  // Floating bars only work while the bridge stays above zero; callers fall back otherwise.
+  const valid = steps.every((s, i) => spacer[i] >= 0 && total[i] >= 0) && steps.some(s => s.value !== 0);
+  const outer = steps.map((s, i) => (i % 6 === 0 ? s.period : ''));
+  // Floating-bar labels sit just outside the bar (on the invisible spacer), in thousands.
+  const thousands = (n) => Math.round(Math.abs(n) / 1000).toLocaleString('en-US');
+  const deltaLabels = steps.map(s => (s.kind === 'delta' ? `${s.value < 0 ? '−' : '+'}${thousands(s.value)}` : null));
+  return { valid, steps, inner: steps.map(s => s.label), outer, spacer, total, increase, decrease, deltaLabels };
+}
+
+// pptxgenjs cannot hide one series or format labels per series, so patch the chart XML:
+// spacer -> no fill + no labels; totals -> white labels; deltas -> dark labels, "−" prefix on decreases.
+async function patchWaterfallCharts(pptxBase64, deltaLabels, fontFace) {
+  const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const spacerLabels = deltaLabels
+    .map((text, idx) => (text === null ? '' : `<c:dLbl><c:idx val="${idx}"/><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" sz="800"><a:solidFill><a:srgbClr val="1F2937"/></a:solidFill><a:latin typeface="${esc(fontFace)}"/></a:rPr><a:t>${esc(text)}</a:t></a:r></a:p></c:rich></c:tx><c:dLblPos val="inEnd"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbl>`))
+    .join('');
+  const { default: JSZip } = await import('jszip');
+  const zip = await JSZip.loadAsync(pptxBase64, { base64: true });
+  let patched = 0;
+  for (const name of Object.keys(zip.files).filter(n => /^ppt\/charts\/chart\d+\.xml$/.test(n))) {
+    let xml = await zip.file(name).async('string');
+    if (!xml.includes(`<c:v>${WATERFALL_SPACER}</c:v>`)) continue;
+    xml = xml.replace(/<c:ser>[\s\S]*?<\/c:ser>/g, (ser) => {
+      const seriesName = (/<c:tx>[\s\S]*?<c:v>([^<]*)<\/c:v>/.exec(ser) || [])[1];
+      if (seriesName === WATERFALL_SPACER) {
+        return ser
+          .replace(/<c:spPr>[\s\S]*?<\/c:spPr>/, '<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>')
+          .replace(/<c:dLbls>[\s\S]*?<\/c:dLbls>/, `<c:dLbls>${spacerLabels}<c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls>`);
+      }
+      if (seriesName !== 'Total') {
+        return ser.replace(/<c:dLbls>[\s\S]*?<\/c:dLbls>/, '<c:dLbls><c:delete val="1"/></c:dLbls>');
+      }
+      return ser
+        .replace(/(<c:dLbls>[\s\S]*?)<c:numFmt [^>]*\/>/, `$1<c:numFmt formatCode="#,##0,;&quot;−&quot;#,##0,;;" sourceLinked="0"/>`)
+        .replace(/(<c:dLbls>[\s\S]*?<a:solidFill>)<a:srgbClr val="[0-9A-Fa-f]{6}"\/>/, '$1<a:srgbClr val="FFFFFF"/>');
+    });
+    zip.file(name, xml);
+    patched++;
+  }
+  if (!patched) return pptxBase64;
+  return zip.generateAsync({ type: 'base64', compression: 'DEFLATE' });
+}
+
+// ============================================================================
 // PPTX GENERATION FUNCTION (From your n8n code)
 // ============================================================================
 
@@ -714,6 +802,7 @@ async function generatePresentation(config) {
 
     // SLIDE 2: KEY FINANCIALS
     const slide2 = pptx.addSlide();
+    let usedNativeWaterfall = null;
     addSlideTitle(slide2, CONFIG.text.slide2Title);
     
     const currentLabel = String(inputData.current_period_label || '').replace('Posting periods ', '').replace(' to ', '-');
@@ -721,8 +810,50 @@ async function generatePresentation(config) {
     addSlideSubtitle(slide2, `Financial overview comparing ${currentLabel} vs ${comparisonLabel}. This slide showcases income statement to analyze overall growth of business and plan expenses for upcoming periods.`);
 
     const chartImageDataUri = CHART_IMAGE_URL ? await downloadImageAsDataUri(CHART_IMAGE_URL) : null;
-    
-    if (chartImageDataUri) {
+    const waterfall = chartImageDataUri ? null : buildWaterfallSeries(inputData, [
+      { key: 'current', label: extractPeriodLabel(inputData.current_period_label) || 'Current' },
+      { key: 'comparison', label: extractPeriodLabel(inputData.comparison_period_label) || 'Prior Year' },
+    ]);
+
+    if (waterfall && waterfall.valid) {
+      const currencyLabel = pptxConfig?.currency_label || 'JPY';
+      const labels = [waterfall.inner, waterfall.outer];
+      slide2.addChart(pptx.ChartType.bar, [
+        { name: WATERFALL_SPACER, labels, values: waterfall.spacer },
+        { name: 'Total', labels, values: waterfall.total },
+        { name: 'Increase', labels, values: waterfall.increase },
+        { name: 'Decrease', labels, values: waterfall.decrease },
+      ], {
+        x: CONFIG.slide2.graphX,
+        y: CONFIG.layout.contentStartY,
+        w: CONFIG.slide2.graphW,
+        h: CONFIG.slide2.graphH,
+        barDir: 'bar',
+        barGrouping: 'stacked',
+        barGapWidthPct: 30,
+        catAxisOrientation: 'maxMin',
+        chartColors: ['FFFFFF', CONFIG.colors.primaryDark, '6EE7B7', 'A7F3D0'],
+        catAxisMultiLevelLabels: true,
+        catAxisLabelFontSize: CONFIG.fontSizes.chartLabel,
+        catAxisLabelColor: CONFIG.colors.gray700,
+        catAxisLabelFontFace: CONFIG.fonts.primary,
+        valAxisHidden: true,
+        valGridLine: { style: 'none' },
+        showLegend: false,
+        showValue: true,
+        dataLabelPosition: 'inEnd',
+        dataLabelFontSize: CONFIG.fontSizes.chartLabel,
+        dataLabelFontFace: CONFIG.fonts.primary,
+        dataLabelFormatCode: '#,##0,',
+        dataLabelColor: '1F2937',
+        showTitle: true,
+        title: `P&L bridge (${currencyLabel} thousands)`,
+        titleFontSize: CONFIG.fontSizes.chartLabel,
+        titleColor: CONFIG.colors.gray500,
+        titleFontFace: CONFIG.fonts.primary,
+      });
+      usedNativeWaterfall = waterfall;
+    } else if (chartImageDataUri) {
       slide2.addImage({
         data: chartImageDataUri,
         x: CONFIG.slide2.graphX,
@@ -1252,7 +1383,8 @@ slide4.addText('Amount in JPY', {
 	      fontFace: CONFIG.fonts.primary,
 	    });
 
-    const pptxBase64 = await pptx.write('base64');
+    let pptxBase64 = await pptx.write('base64');
+    if (usedNativeWaterfall) pptxBase64 = await patchWaterfallCharts(pptxBase64, usedNativeWaterfall.deltaLabels, CONFIG.fonts.primary);
     const safeCompany = String(inputData.company_name || 'Company');
     const filename = `${CONFIG.metadata.filenamePrefix}_${safeCompany.replace(/[^a-z0-9]/gi, '_')}.pptx`;
     
@@ -1390,7 +1522,7 @@ app.get('/d/:id/:filename', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', version: 'download-link-1', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', version: 'native-waterfall-1', timestamp: new Date().toISOString() });
 });
 
 // Web front end (config + run-workflow UI), served at the root.
