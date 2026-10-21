@@ -153,6 +153,7 @@ function normalizeFinancialData(raw) {
     budget_data: d.budget_data ?? d.budgetData ?? {},
     // n8n v2: Actual / Budget / Prior Year lines. Its presence switches on the v2 slides.
     three_way: d.three_way ?? null,
+    account_names_ja: d.account_names_ja ?? null,
   };
 
   // Ensure required nested structures for slide 2 logic
@@ -181,7 +182,7 @@ function normalizeFinancialData(raw) {
 
 const WATERFALL_SPACER = '(spacer)';
 
-function buildWaterfallSeries(d, periods) {
+function buildWaterfallSeries(d, periods, names = ['Revenue', 'COGS', 'Gross Profit', 'OPEX', 'Other, net', 'Net Income']) {
   const steps = [];
   for (const p of periods) {
     const v = (m) => toNum(d?.[m]?.[p.key] ?? 0);
@@ -192,12 +193,12 @@ function buildWaterfallSeries(d, periods) {
     const netIncome = v('profit_after_tax');
     const other = netIncome - (grossProfit - opex);
     steps.push(
-      { label: 'Revenue', period: p.label, kind: 'total', value: revenue },
-      { label: 'COGS', period: p.label, kind: 'delta', value: -cogs },
-      { label: 'Gross Profit', period: p.label, kind: 'total', value: grossProfit },
-      { label: 'OPEX', period: p.label, kind: 'delta', value: -opex },
-      { label: 'Other, net', period: p.label, kind: 'delta', value: other },
-      { label: 'Net Income', period: p.label, kind: 'total', value: netIncome },
+      { label: names[0], period: p.label, kind: 'total', value: revenue },
+      { label: names[1], period: p.label, kind: 'delta', value: -cogs },
+      { label: names[2], period: p.label, kind: 'total', value: grossProfit },
+      { label: names[3], period: p.label, kind: 'delta', value: -opex },
+      { label: names[4], period: p.label, kind: 'delta', value: other },
+      { label: names[5], period: p.label, kind: 'total', value: netIncome },
     );
   }
 
@@ -259,12 +260,34 @@ async function patchWaterfallCharts(pptxBase64, deltaLabels, fontFace) {
   return zip.generateAsync({ type: 'base64', compression: 'DEFLATE' });
 }
 
+// Kanji/kana render in Yu Gothic while Latin text and numbers stay in the primary font:
+// pptxgenjs writes the same face into <a:ea>, so point every East Asian slot at Yu Gothic
+// (charts only carry <a:latin>, so add the slot there). Japanese decks are tagged ja-JP.
+async function applyEastAsianFont(pptxBase64, ja) {
+  const { default: JSZip } = await import('jszip');
+  const zip = await JSZip.loadAsync(pptxBase64, { base64: true });
+  for (const name of Object.keys(zip.files).filter(n => /^ppt\/(slides\/slide|charts\/chart)\d+\.xml$/.test(n))) {
+    let xml = await zip.file(name).async('string');
+    xml = xml.replace(/<a:ea typeface="[^"]*"/g, '<a:ea typeface="Yu Gothic"');
+    xml = xml.replace(/(<a:latin typeface="[^"]*"[^>]*\/>)(?!<a:ea)/g, '$1<a:ea typeface="Yu Gothic"/>');
+    if (ja) xml = xml.replace(/ lang="en-US"/g, ' lang="ja-JP"');
+    zip.file(name, xml);
+  }
+  return zip.generateAsync({ type: 'base64', compression: 'DEFLATE' });
+}
+
 // ============================================================================
 // PPTX GENERATION FUNCTION (From your n8n code)
 // ============================================================================
 
 async function generatePresentation(config) {
   const { pptxConfig, financialData, coverImageUrl, chartImageUrl, chartData, shopCommentary, executiveSummary } = config;
+  // Deck language: 'ja' or 'en' (default). Every fixed label goes through t(english, japanese).
+  const JA = String(config.language || pptxConfig?.language || '').toLowerCase() === 'ja';
+  const t = (en, ja) => (JA ? ja : en);
+  // Account lines from the CSV shown under their Japanese names (map sent by the workflow).
+  const ACCOUNT_JA = (financialData && financialData.account_names_ja) || {};
+  const acct = (name) => (JA && ACCOUNT_JA[String(name ?? '').trim()]) || name;
   
   // Configuration loading
   const cfg = pptxConfig || {};
@@ -414,13 +437,13 @@ async function generatePresentation(config) {
     
     // === TEXT CONTENT ===
     text: {
-      slide2Title: textContent.text_slide2_title || 'Key monthly financials metrics with gross and net profit',
-      slide3Title: textContent.text_slide3_title || 'Monthly financial metrics dashboard with income statement',
-      slide4Title: textContent.text_slide4_title || 'Monthly financials metrics with revenue and gross profit',
-      footer: textContent.text_footer || 'This graph/chart is linked to excel, and changes automatically based on data. Just left click on it and select "edit data"',
-      takeawayTemplate1: textContent.text_takeaway_template_1 || 'Year-on-year revenue change of {var}%.',
-      takeawayTemplate2: textContent.text_takeaway_template_2 || 'Gross profit margin of {var}% of revenue.',
-      takeawayTemplate3: textContent.text_takeaway_template_3 || 'Year-on-year net profit change of {var}M (local currency).'
+      slide2Title: JA ? '主要財務指標：売上総利益と当期純利益' : (textContent.text_slide2_title || 'Key monthly financials metrics with gross and net profit'),
+      slide3Title: JA ? '財務ダッシュボードと損益計算書' : (textContent.text_slide3_title || 'Monthly financial metrics dashboard with income statement'),
+      slide4Title: JA ? '店舗別売上高と予算差異' : (textContent.text_slide4_title || 'Monthly financials metrics with revenue and gross profit'),
+      footer: JA ? 'グラフはExcelデータと連動しています。グラフを右クリックし「データの編集」から更新できます。' : (textContent.text_footer || 'This graph/chart is linked to excel, and changes automatically based on data. Just left click on it and select "edit data"'),
+      takeawayTemplate1: JA ? '売上高の前年同期比 {var}%' : (textContent.text_takeaway_template_1 || 'Year-on-year revenue change of {var}%.'),
+      takeawayTemplate2: JA ? '売上総利益率 {var}%' : (textContent.text_takeaway_template_2 || 'Gross profit margin of {var}% of revenue.'),
+      takeawayTemplate3: JA ? '当期純利益の前年同期差 {var}百万（現地通貨）' : (textContent.text_takeaway_template_3 || 'Year-on-year net profit change of {var}M (local currency).')
     },
     
     // === OPEX BREAKDOWN ===
@@ -524,10 +547,21 @@ async function generatePresentation(config) {
   }
 
   // "Posting periods 001/2025 to 003/2025" -> "Jan–Mar 2025" (a single period -> "Mar 2025").
+  // Japanese: "2025年1月〜3月" / "2025年3月".
   function periodRange(label, months) {
     const s = String(label ?? '');
     const m = s.match(/(\d{3})\/(\d{4})\s*to\s*(\d{3})\/(\d{4})/i);
     const name = (p) => months[parseInt(p, 10) - 1];
+    if (JA) {
+      const mo = (p) => parseInt(p, 10);
+      if (m && mo(m[1]) >= 1 && mo(m[3]) <= 12) {
+        if (m[1] === m[3] && m[2] === m[4]) return `${m[4]}年${mo(m[3])}月`;
+        if (m[2] === m[4]) return `${m[4]}年${mo(m[1])}月〜${mo(m[3])}月`;
+        return `${m[2]}年${mo(m[1])}月〜${m[4]}年${mo(m[3])}月`;
+      }
+      const one = s.match(/(\d{3})\/(\d{4})/);
+      return one ? `${one[2]}年${mo(one[1])}月` : '';
+    }
     if (m && name(m[1]) && name(m[3])) {
       if (m[1] === m[3] && m[2] === m[4]) return `${name(m[3])} ${m[4]}`;
       if (m[2] === m[4]) return `${name(m[1])}–${name(m[3])} ${m[4]}`;
@@ -582,7 +616,7 @@ async function generatePresentation(config) {
       line: { type: 'none' }
     });
 
-    slide.addText('Key Takeaways', {
+    slide.addText(t('Key Takeaways', '要点'), {
       x: CONFIG.slide2.takeawayBoxX,
       y: CONFIG.layout.takeawaysY,
       w: CONFIG.slide2.takeawayBoxW,
@@ -703,7 +737,7 @@ async function generatePresentation(config) {
       fontSize: 12, bold: true, align: 'right', valign: 'middle',
       color: varPct >= 0 ? CONFIG.colors.positive : CONFIG.colors.negative, fontFace: CONFIG.fonts.primary,
     });
-    slide.addText(`vs Budget ${formatCurrency(budget)}`, {
+    slide.addText(t(`vs Budget ${formatCurrency(budget)}`, `予算 ${formatCurrency(budget)}`), {
       x: x + 0.18, y: 5.14, w: 2.5, h: 0.22,
       fontSize: CONFIG.fontSizes.small, color: CONFIG.colors.gray500, fontFace: CONFIG.fonts.primary,
     });
@@ -750,7 +784,7 @@ async function generatePresentation(config) {
       x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
     });
 
-    slide.addText("Monthly\nFinancials\nMetrics", {
+    slide.addText(t("Monthly\nFinancials\nMetrics", "月次\n業績\nレポート"), {
       x: sx(CONFIG.cover.titleX), y: sx(CONFIG.cover.titleY), w: sx(5.85), h: sx(3.40),
       fontFace: CONFIG.fonts.primary,
       fontSize: even(CONFIG.cover.titleFontSize * S),
@@ -766,7 +800,7 @@ async function generatePresentation(config) {
       line: { color: CONFIG.colors.white, transparency: 100 },
     });
 
-    slide.addText(inputData.company_name || "Your Company Name", {
+    slide.addText(inputData.company_name || t("Your Company Name", "会社名"), {
       x: sx(CONFIG.cover.titleX), y: sx(5.78), w: sx(5.85), h: sx(0.40),
       fontFace: CONFIG.fonts.primary,
       fontSize: even(18 * S),
@@ -802,8 +836,10 @@ async function generatePresentation(config) {
   // Cost lines are favourable when they come in below the comparison.
   const varColor = (p, cost) => (p === null || p === 0 ? CONFIG.colors.gray700 : ((p > 0) !== !!cost ? CONFIG.colors.positive : CONFIG.colors.negative));
   const twLine = (key) => (TW ? TW.lines.find(l => l.key === key) : null) || { actual: 0, budget: null, prior: null };
-  const twPeriod = extractPeriodLabel(inputData.current_period_label) || 'Current';
-  const twPriorPeriod = extractPeriodLabel(inputData.comparison_period_label) || 'Prior Year';
+  const twPeriod = extractPeriodLabel(inputData.current_period_label) || t('Current', '当期');
+  const twPriorPeriod = extractPeriodLabel(inputData.comparison_period_label) || t('Prior Year', '前年同期');
+  const TW_LABELS_JA = { revenue: '売上高', cogs: '売上原価', gross_profit: '売上総利益', operating_expenses: '営業費用', operating_profit: '営業利益', other_income: 'その他収益', finance_costs: '金融費用', profit_after_tax: '当期純利益' };
+  const twLabel = (l) => (JA && TW_LABELS_JA[l.key]) || l.label;
 
   function addV2Takeaways(slide, pptx, texts) {
     addKeyTakeaways(slide, pptx, texts.slice(0, 3));
@@ -821,19 +857,23 @@ async function generatePresentation(config) {
       .filter(it => it.g !== null && revGrowth !== null && it.g > revGrowth)
       .sort((a, b) => b.actual - a.actual);
     return {
-      headline: `Revenue ${fmtAmt(rev.actual)}: ${fmtPct(pctChange(rev.actual, rev.budget))} vs budget, ${fmtPct(revGrowth)} vs prior year.`,
+      headline: t(`Revenue ${fmtAmt(rev.actual)}: ${fmtPct(pctChange(rev.actual, rev.budget))} vs budget, ${fmtPct(revGrowth)} vs prior year.`,
+        `売上高${fmtAmt(rev.actual)}：予算比${fmtPct(pctChange(rev.actual, rev.budget))}、前年同期比${fmtPct(revGrowth)}。`),
       points: [
-        { title: 'Against budget', text: `Revenue ${fmtPct(pctChange(rev.actual, rev.budget))}, operating profit ${fmtPct(pctChange(op.actual, op.budget))} and profit after tax ${fmtPct(pctChange(pat.actual, pat.budget))} vs budget.` },
-        { title: 'Against prior year', text: `Revenue ${fmtPct(revGrowth)} and profit after tax ${fmtPct(pctChange(pat.actual, pat.prior))} vs ${twPriorPeriod}.` },
-        { title: 'Costs and margin', text: `Operating expenses ${fmtAmt(opex.actual)} (${fmtPct(pctChange(opex.actual, opex.budget))} vs budget)${top && opex.actual ? `; ${top.name} is ${Math.round((top.actual / opex.actual) * 100)}% of the total` : ''}.` },
+        { title: t('Against budget', '予算との比較'), text: t(`Revenue ${fmtPct(pctChange(rev.actual, rev.budget))}, operating profit ${fmtPct(pctChange(op.actual, op.budget))} and profit after tax ${fmtPct(pctChange(pat.actual, pat.budget))} vs budget.`,
+          `予算比で売上高${fmtPct(pctChange(rev.actual, rev.budget))}、営業利益${fmtPct(pctChange(op.actual, op.budget))}、当期純利益${fmtPct(pctChange(pat.actual, pat.budget))}。`) },
+        { title: t('Against prior year', '前年同期との比較'), text: t(`Revenue ${fmtPct(revGrowth)} and profit after tax ${fmtPct(pctChange(pat.actual, pat.prior))} vs ${twPriorPeriod}.`,
+          `${twPriorPeriod}比で売上高${fmtPct(revGrowth)}、当期純利益${fmtPct(pctChange(pat.actual, pat.prior))}。`) },
+        { title: t('Costs and margin', '費用と利益率'), text: t(`Operating expenses ${fmtAmt(opex.actual)} (${fmtPct(pctChange(opex.actual, opex.budget))} vs budget)${top && opex.actual ? `; ${top.name} is ${Math.round((top.actual / opex.actual) * 100)}% of the total` : ''}.`,
+          `営業費用${fmtAmt(opex.actual)}（予算比${fmtPct(pctChange(opex.actual, opex.budget))}）${top && opex.actual ? `。${acct(top.name)}が営業費用の${Math.round((top.actual / opex.actual) * 100)}%を占める` : ''}。`) },
       ],
       watch: [
         ...items
           .map(it => ({ ...it, vb: pctChange(it.actual, it.budget) }))
           .filter(it => it.vb !== null && it.vb >= 10 && opex.actual && it.actual / opex.actual >= 0.02)
           .sort((a, b) => (b.actual - b.budget) - (a.actual - a.budget))
-          .map(it => `${it.name} is ${fmtPct(it.vb)} over budget (${fmtAmt(it.actual)} vs ${fmtAmt(it.budget)}).`),
-        ...fastCosts.map(it => `${it.name} grew ${fmtPct(it.g)} vs prior year, faster than revenue (${fmtPct(revGrowth)}).`),
+          .map(it => t(`${it.name} is ${fmtPct(it.vb)} over budget (${fmtAmt(it.actual)} vs ${fmtAmt(it.budget)}).`, `${acct(it.name)}が予算を${fmtPct(it.vb)}超過（実績${fmtAmt(it.actual)}、予算${fmtAmt(it.budget)}）。`)),
+        ...fastCosts.map(it => t(`${it.name} grew ${fmtPct(it.g)} vs prior year, faster than revenue (${fmtPct(revGrowth)}).`, `${acct(it.name)}は前年同期比${fmtPct(it.g)}と、売上高の伸び（${fmtPct(revGrowth)}）を上回る。`)),
       ].slice(0, 3),
       computed: true,
     };
@@ -843,24 +883,24 @@ async function generatePresentation(config) {
     const ai = executiveSummary && Array.isArray(executiveSummary.points) && executiveSummary.points.length ? executiveSummary : null;
     const s = ai || computedSummary();
     const slide = pptx.addSlide();
-    addSlideTitle(slide, 'Executive summary');
+    addSlideTitle(slide, t('Executive summary', 'エグゼクティブサマリー'));
     slide.addText(s.headline || '', {
       x: CONFIG.layout.marginLeft, y: 0.6, w: 9, h: 0.6,
       fontSize: V2.headline, bold: true, color: CONFIG.colors.primaryDark, fontFace: CONFIG.fonts.primary, valign: 'top',
     });
 
     // KPI tiles: one shape + one multi-run text box each
-    const tiles = [['Revenue', twLine('revenue')], ['Operating profit', twLine('operating_profit')], ['Profit after tax', twLine('profit_after_tax')]];
+    const tiles = [[t('Revenue', '売上高'), twLine('revenue')], [t('Operating profit', '営業利益'), twLine('operating_profit')], [t('Profit after tax', '当期純利益'), twLine('profit_after_tax')]];
     tiles.forEach(([label, l], i) => {
       const x = CONFIG.layout.marginLeft + i * 3.05;
       const vb = pctChange(l.actual, l.budget), vp = pctChange(l.actual, l.prior);
       slide.addShape(pptx.ShapeType.rect, { x, y: 1.3, w: 2.9, h: 0.95, fill: { color: CONFIG.colors.gray50 }, line: { color: 'D1D5DB', width: 1 } });
       slide.addText([
-        { text: `${label} (${twPeriod})`, options: { fontSize: V2.small, color: CONFIG.colors.gray500, breakLine: true } },
+        { text: t(`${label} (${twPeriod})`, `${label}（${twPeriod}）`), options: { fontSize: V2.small, color: CONFIG.colors.gray500, breakLine: true } },
         { text: fmtAmt(l.actual), options: { fontSize: V2.kpi, bold: true, color: CONFIG.colors.gray900, breakLine: true } },
-        { text: `vs budget ${fmtPct(vb)}`, options: { fontSize: V2.small, bold: true, color: varColor(vb, false) } },
+        { text: `${t('vs budget', '予算比')} ${fmtPct(vb)}`, options: { fontSize: V2.small, bold: true, color: varColor(vb, false) } },
         { text: '   ', options: { fontSize: V2.small } },
-        { text: `vs prior year ${fmtPct(vp)}`, options: { fontSize: V2.small, bold: true, color: varColor(vp, false) } },
+        { text: `${t('vs prior year', '前年同期比')} ${fmtPct(vp)}`, options: { fontSize: V2.small, bold: true, color: varColor(vp, false) } },
       ], { x: x + 0.12, y: 1.32, w: 2.7, h: 0.9, fontFace: CONFIG.fonts.primary, valign: 'middle', margin: 0 });
     });
 
@@ -874,30 +914,32 @@ async function generatePresentation(config) {
     const watch = (s.watch || []).slice(0, 3);
     slide.addShape(pptx.ShapeType.rect, { x: 6.65, y: 2.45, w: 2.85, h: 2.5, fill: { color: CONFIG.colors.takeawayBg }, line: { type: 'none' } });
     slide.addText([
-      { text: 'Watch items', options: { fontSize: V2.point, bold: true, color: CONFIG.colors.gray900, breakLine: true } },
+      { text: t('Watch items', '注視事項'), options: { fontSize: V2.point, bold: true, color: CONFIG.colors.gray900, breakLine: true } },
       ...(watch.length
         ? watch.map((w, i) => ({ text: w, options: { fontSize: V2.body, color: CONFIG.colors.gray700, bullet: { indent: 12 }, breakLine: i < watch.length - 1, paraSpaceBefore: 6 } }))
-        : [{ text: 'No items flagged.', options: { fontSize: V2.body, color: CONFIG.colors.gray500 } }]),
+        : [{ text: t('No items flagged.', '該当なし'), options: { fontSize: V2.body, color: CONFIG.colors.gray500 } }]),
     ], { x: 6.8, y: 2.55, w: 2.6, h: 2.3, fontFace: CONFIG.fonts.primary, valign: 'top', margin: 0 });
 
-    slide.addText(ai ? 'AI-drafted from the reported figures. Review before distribution.' : 'Computed from the reported figures (AI summary unavailable for this run).', {
+    slide.addText(ai ? t('AI-drafted from the reported figures. Review before distribution.', 'AIが報告数値をもとに作成。配布前に内容を確認してください。')
+      : t('Computed from the reported figures (AI summary unavailable for this run).', '報告数値から自動算出（今回はAIサマリーを利用できませんでした）。'), {
       x: CONFIG.layout.marginLeft, y: 5.15, w: 9, h: 0.3, fontSize: V2.small, color: CONFIG.colors.gray500, fontFace: CONFIG.fonts.primary,
     });
   }
 
   function addThreeWaySlide(pptx) {
     const slide = pptx.addSlide();
-    addSlideTitle(slide, 'P&L: actual vs budget vs prior year');
-    addSlideSubtitle(slide, `${twPeriod} actual against budget and against ${twPriorPeriod}. Green = favourable, red = unfavourable (lower costs count as favourable).`);
+    addSlideTitle(slide, t('P&L: actual vs budget vs prior year', '損益：実績・予算・前年同期の比較'));
+    addSlideSubtitle(slide, t(`${twPeriod} actual against budget and against ${twPriorPeriod}. Green = favourable, red = unfavourable (lower costs count as favourable).`,
+      `${twPeriod}の実績を予算および${twPriorPeriod}と比較。緑＝有利、赤＝不利（費用は減少を有利とする）。`));
 
-    const head = ['', 'Actual', 'Budget', 'vs Bud', 'vs Bud %', 'Prior Year', 'vs PY %'];
+    const head = JA ? ['', '実績', '予算', '予算差', '予算比', '前年同期', '前年比'] : ['', 'Actual', 'Budget', 'vs Bud', 'vs Bud %', 'Prior Year', 'vs PY %'];
     const rows = [head.map((h, i) => ({ text: h, options: { bold: true, fontSize: V2.small, color: CONFIG.colors.white, fill: CONFIG.colors.tableHeaderBg, align: i ? 'right' : 'left' } }))];
     TW.lines.forEach(l => {
       const vb = pctChange(l.actual, l.budget), vp = pctChange(l.actual, l.prior);
       const fill = l.subtotal ? CONFIG.colors.gray100 : CONFIG.colors.white;
       const base = { fontSize: V2.small, fill, bold: !!l.subtotal, align: 'right' };
       rows.push([
-        { text: l.label, options: { ...base, align: 'left', color: CONFIG.colors.gray800 } },
+        { text: twLabel(l), options: { ...base, align: 'left', color: CONFIG.colors.gray800 } },
         { text: fmtAmt(l.actual), options: { ...base, color: CONFIG.colors.gray900 } },
         { text: fmtAmt(l.budget), options: { ...base, color: CONFIG.colors.gray500 } },
         { text: isNum(l.budget) ? fmtDiff(l.actual - l.budget) : '–', options: { ...base, color: varColor(vb, l.cost) } },
@@ -914,13 +956,13 @@ async function generatePresentation(config) {
 
     const shops = TW.revenue_items || [];
     slide.addChart(pptx.ChartType.bar, [
-      { name: 'Actual', labels: shops.map(s => s.name), values: shops.map(s => s.actual || 0) },
-      { name: 'Budget', labels: shops.map(s => s.name), values: shops.map(s => s.budget || 0) },
-      { name: 'Prior Year', labels: shops.map(s => s.name), values: shops.map(s => s.prior || 0) },
+      { name: t('Actual', '実績'), labels: shops.map(s => s.name), values: shops.map(s => s.actual || 0) },
+      { name: t('Budget', '予算'), labels: shops.map(s => s.name), values: shops.map(s => s.budget || 0) },
+      { name: t('Prior Year', '前年同期'), labels: shops.map(s => s.name), values: shops.map(s => s.prior || 0) },
     ], {
       x: 6.65, y: 1.0, w: 3.0, h: 3.45, barDir: 'col', barGrouping: 'clustered', barGapWidthPct: 60,
       chartColors: [CONFIG.colors.primaryDark, '9CA3AF', 'D1D5DB'],
-      showTitle: true, title: 'Revenue by shop', titleFontSize: V2.small, titleColor: CONFIG.colors.gray700, titleFontFace: CONFIG.fonts.primary,
+      showTitle: true, title: t('Revenue by shop', '店舗別売上高'), titleFontSize: V2.small, titleColor: CONFIG.colors.gray700, titleFontFace: CONFIG.fonts.primary,
       showLegend: true, legendPos: 'b', legendFontSize: V2.small, legendFontFace: CONFIG.fonts.primary,
       catAxisLabelFontSize: V2.small, catAxisLabelFontFace: CONFIG.fonts.primary,
       valAxisLabelFontSize: V2.small, valAxisLabelFormatCode: '#,##0,"k"',
@@ -930,20 +972,22 @@ async function generatePresentation(config) {
     const rev = twLine('revenue'), pat = twLine('profit_after_tax');
     const best = [...shops].map(s => ({ ...s, vb: pctChange(s.actual, s.budget) })).filter(s => s.vb !== null).sort((a, b) => b.vb - a.vb)[0];
     addV2Takeaways(slide, pptx, [
-      `Revenue ${fmtPct(pctChange(rev.actual, rev.budget))} vs budget, ${fmtPct(pctChange(rev.actual, rev.prior))} vs prior year.`,
-      `Profit after tax ${fmtPct(pctChange(pat.actual, pat.budget))} vs budget.`,
-      best ? `${best.name}: largest beat vs budget (${fmtPct(best.vb)}).` : 'No shop-level budget available.',
+      t(`Revenue ${fmtPct(pctChange(rev.actual, rev.budget))} vs budget, ${fmtPct(pctChange(rev.actual, rev.prior))} vs prior year.`,
+        `売上高：予算比${fmtPct(pctChange(rev.actual, rev.budget))}、前年同期比${fmtPct(pctChange(rev.actual, rev.prior))}`),
+      t(`Profit after tax ${fmtPct(pctChange(pat.actual, pat.budget))} vs budget.`, `当期純利益：予算比${fmtPct(pctChange(pat.actual, pat.budget))}`),
+      best ? t(`${best.name}: largest beat vs budget (${fmtPct(best.vb)}).`, `${best.name}：予算超過幅が最大（${fmtPct(best.vb)}）`) : t('No shop-level budget available.', '店舗別予算なし'),
     ]);
   }
 
   function addOpexDeepDiveSlide(pptx) {
     const slide = pptx.addSlide();
-    addSlideTitle(slide, 'Operating expenses deep-dive');
-    addSlideSubtitle(slide, `Operating expense lines for ${twPeriod}, largest first (PY = ${twPriorPeriod}). Highlighted: 10% or more off budget and at least 2% of total OPEX.`);
+    addSlideTitle(slide, t('Operating expenses deep-dive', '営業費用の詳細分析'));
+    addSlideSubtitle(slide, t(`Operating expense lines for ${twPeriod}, largest first (PY = ${twPriorPeriod}). Highlighted: 10% or more off budget and at least 2% of total OPEX.`,
+      `${twPeriod}の営業費用（金額順、前年＝${twPriorPeriod}）。黄色：予算差10%以上かつ営業費用合計の2%以上の科目。`));
 
     const opex = twLine('operating_expenses'), rev = twLine('revenue');
     const items = [...(TW.opex_items || [])].sort((a, b) => b.actual - a.actual);
-    const head = ['', 'Actual', 'Budget', 'vs Bud', 'PY', 'vs PY', '% rev'];
+    const head = JA ? ['', '実績', '予算', '予算比', '前年', '前年比', '売上比'] : ['', 'Actual', 'Budget', 'vs Bud', 'PY', 'vs PY', '% rev'];
     const rows = [head.map((h, i) => ({ text: h, options: { bold: true, fontSize: V2.small, color: CONFIG.colors.white, fill: CONFIG.colors.tableHeaderBg, align: i ? 'right' : 'left' } }))];
     const row = (name, l, opts = {}) => {
       const vb = pctChange(l.actual, l.budget), vp = pctChange(l.actual, l.prior);
@@ -963,12 +1007,12 @@ async function generatePresentation(config) {
     // Largest 9 lines, the rest folded into one row so the table never runs into the takeaways
     const shown = items.length > 10 ? items.slice(0, 9) : items;
     const rest = items.slice(shown.length);
-    shown.forEach(it => rows.push(row(it.name, it)));
+    shown.forEach(it => rows.push(row(acct(it.name), it)));
     if (rest.length) {
       const sum = (k) => (rest.every(it => isNum(it[k])) ? rest.reduce((t, it) => t + it[k], 0) : null);
-      rows.push(row(`Other (${rest.length} lines)`, { actual: sum('actual'), budget: sum('budget'), prior: sum('prior') }));
+      rows.push(row(t(`Other (${rest.length} lines)`, `その他（${rest.length}科目）`), { actual: sum('actual'), budget: sum('budget'), prior: sum('prior') }));
     }
-    rows.push(row('Total operating expenses', opex, { total: true }));
+    rows.push(row(t('Total operating expenses', '営業費用合計'), opex, { total: true }));
     const rowH = 0.26;
     slide.addTable(rows, {
       x: CONFIG.layout.marginLeft, y: 1.05, w: 6.06, colW: [2.1, 0.7, 0.7, 0.64, 0.7, 0.66, 0.56], rowH,
@@ -978,12 +1022,12 @@ async function generatePresentation(config) {
 
     const top = items.slice(0, 5).reverse();
     slide.addChart(pptx.ChartType.bar, [
-      { name: 'Actual', labels: top.map(t => t.name), values: top.map(t => t.actual || 0) },
-      { name: 'Budget', labels: top.map(t => t.name), values: top.map(t => t.budget || 0) },
+      { name: t('Actual', '実績'), labels: top.map(it => acct(it.name)), values: top.map(it => it.actual || 0) },
+      { name: t('Budget', '予算'), labels: top.map(it => acct(it.name)), values: top.map(it => it.budget || 0) },
     ], {
       x: 6.65, y: 1.0, w: 3.0, h: 3.45, barDir: 'bar', barGrouping: 'clustered', barGapWidthPct: 50,
       chartColors: [CONFIG.colors.primaryDark, '9CA3AF'],
-      showTitle: true, title: 'Top 5 lines: actual vs budget', titleFontSize: V2.small, titleColor: CONFIG.colors.gray700, titleFontFace: CONFIG.fonts.primary,
+      showTitle: true, title: t('Top 5 lines: actual vs budget', '上位5科目：実績と予算'), titleFontSize: V2.small, titleColor: CONFIG.colors.gray700, titleFontFace: CONFIG.fonts.primary,
       showLegend: true, legendPos: 'b', legendFontSize: V2.small, legendFontFace: CONFIG.fonts.primary,
       catAxisLabelFontSize: V2.small, catAxisLabelFontFace: CONFIG.fonts.primary,
       valAxisLabelFontSize: V2.small, valAxisLabelFormatCode: '#,##0,"k"',
@@ -994,9 +1038,13 @@ async function generatePresentation(config) {
     const ratio = (l) => (l.actual && rev.actual ? (l.actual / rev.actual) * 100 : null);
     const ratioPrior = opex.prior && rev.prior ? (opex.prior / rev.prior) * 100 : null;
     addV2Takeaways(slide, pptx, [
-      biggest && opex.actual ? `${biggest.name}: ${Math.round((biggest.actual / opex.actual) * 100)}% of OPEX.` : 'No OPEX lines found.',
-      `OPEX ${fmtPct(pctChange(opex.actual, opex.budget))} vs budget (${fmtDiff(isNum(opex.budget) ? opex.actual - opex.budget : null)}).`,
-      `OPEX ratio ${ratio(opex) === null ? '–' : ratio(opex).toFixed(1) + '%'} of revenue (prior year ${ratioPrior === null ? '–' : ratioPrior.toFixed(1) + '%'}).`,
+      biggest && opex.actual
+        ? t(`${biggest.name}: ${Math.round((biggest.actual / opex.actual) * 100)}% of OPEX.`, `${acct(biggest.name)}：営業費用の${Math.round((biggest.actual / opex.actual) * 100)}%`)
+        : t('No OPEX lines found.', '営業費用の科目なし'),
+      t(`OPEX ${fmtPct(pctChange(opex.actual, opex.budget))} vs budget (${fmtDiff(isNum(opex.budget) ? opex.actual - opex.budget : null)}).`,
+        `営業費用：予算比${fmtPct(pctChange(opex.actual, opex.budget))}（${fmtDiff(isNum(opex.budget) ? opex.actual - opex.budget : null)}）`),
+      t(`OPEX ratio ${ratio(opex) === null ? '–' : ratio(opex).toFixed(1) + '%'} of revenue (prior year ${ratioPrior === null ? '–' : ratioPrior.toFixed(1) + '%'}).`,
+        `営業費用率：売上高の${ratio(opex) === null ? '–' : ratio(opex).toFixed(1) + '%'}（前年同期${ratioPrior === null ? '–' : ratioPrior.toFixed(1) + '%'}）`),
     ]);
   }
 
@@ -1023,13 +1071,13 @@ async function generatePresentation(config) {
     
     const currentLabel = extractPeriodLabel(inputData.current_period_label);
     const comparisonLabel = extractPeriodLabel(inputData.comparison_period_label);
-    addSlideSubtitle(slide2, `Income statement and P&L bridge, ${currentLabel} vs ${comparisonLabel}.`);
+    addSlideSubtitle(slide2, t(`Income statement and P&L bridge, ${currentLabel} vs ${comparisonLabel}.`, `損益計算書と利益ブリッジ（${currentLabel} 対 ${comparisonLabel}）`));
 
     const chartImageDataUri = CHART_IMAGE_URL ? await downloadImageAsDataUri(CHART_IMAGE_URL) : null;
     const waterfall = chartImageDataUri ? null : buildWaterfallSeries(inputData, [
-      { key: 'current', label: extractPeriodLabel(inputData.current_period_label) || 'Current' },
-      { key: 'comparison', label: extractPeriodLabel(inputData.comparison_period_label) || 'Prior Year' },
-    ]);
+      { key: 'current', label: extractPeriodLabel(inputData.current_period_label) || t('Current', '当期') },
+      { key: 'comparison', label: extractPeriodLabel(inputData.comparison_period_label) || t('Prior Year', '前年同期') },
+    ], JA ? ['売上高', '売上原価', '売上総利益', '営業費用', 'その他（純額）', '当期純利益'] : undefined);
 
     if (waterfall && waterfall.valid) {
       const currencyLabel = pptxConfig?.currency_label || 'JPY';
@@ -1063,7 +1111,7 @@ async function generatePresentation(config) {
         dataLabelFormatCode: '#,##0,',
         dataLabelColor: '1F2937',
         showTitle: true,
-        title: `P&L bridge (${currencyLabel} thousands)`,
+        title: t(`P&L bridge (${currencyLabel} thousands)`, `利益ブリッジ（単位：千${currencyLabel === 'JPY' ? '円' : currencyLabel}）`),
         titleFontSize: CONFIG.fontSizes.chartLabel,
         titleColor: CONFIG.colors.gray500,
         titleFontFace: CONFIG.fonts.primary,
@@ -1173,11 +1221,11 @@ const depAmortItems = pickBy(n =>
 const pickedAll = [...employeeBenefitsItems, ...advertisementItems, ...legalProfItems, ...depAmortItems];
 const otherItems = remainingExcluding(pickedAll);
 
-const employeeBenefitsTotal = { name: 'Employee Benefits Expenses', ...sumItems(employeeBenefitsItems) };
-const advertisementTotal    = { name: 'Advertisement and Publicity', ...sumItems(advertisementItems) };
-const legalProfTotal        = { name: 'Legal and Professional Charges', ...sumItems(legalProfItems) };
-const depAmortTotal         = { name: 'Depreciation and Amortization', ...sumItems(depAmortItems) };
-const otherExpensesTotal    = { name: 'Other', ...sumItems(otherItems) };
+const employeeBenefitsTotal = { name: t('Employee Benefits Expenses', '人件費'), ...sumItems(employeeBenefitsItems) };
+const advertisementTotal    = { name: t('Advertisement and Publicity', '広告宣伝費'), ...sumItems(advertisementItems) };
+const legalProfTotal        = { name: t('Legal and Professional Charges', '支払報酬'), ...sumItems(legalProfItems) };
+const depAmortTotal         = { name: t('Depreciation and Amortization', '減価償却費'), ...sumItems(depAmortItems) };
+const otherExpensesTotal    = { name: t('Other', 'その他'), ...sumItems(otherItems) };
 
 // Build in the exact order you expect (skip empty lines unless you want them shown)
 const expenseBreakdown = [];
@@ -1196,11 +1244,11 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
 
     // Build table data (continuing with all rows from your original code...)
     const tableData = [];
-    tableData.push(createTableHeader(['Metric', currentPeriodShort, comparisonPeriodShort, 'Var %']));
+    tableData.push(createTableHeader([t('Metric', '項目'), currentPeriodShort, comparisonPeriodShort, t('Var %', '増減率')]));
 
     // Revenue
     tableData.push([
-      { text: 'Revenue', options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray800, align: 'left', fontFace: CONFIG.fonts.primary } },
+      { text: t('Revenue', '売上高'), options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray800, align: 'left', fontFace: CONFIG.fonts.primary } },
       { text: formatCurrency(inputData.revenue.current), options: { fontSize: CONFIG.fontSizes.table, align: 'right', fontFace: CONFIG.fonts.primary } },
       { text: formatCurrency(inputData.revenue.comparison), options: { fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray500, align: 'right', fontFace: CONFIG.fonts.primary } },
       { text: calculateVariance(inputData.revenue.current, inputData.revenue.comparison), options: { fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.positive, bold: true, align: 'right', fontFace: CONFIG.fonts.primary } }
@@ -1208,7 +1256,7 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
 
     // COGS
     tableData.push([
-      { text: 'Cost of Goods Sold', options: { fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray700, align: 'left', fontFace: CONFIG.fonts.primary } },
+      { text: t('Cost of Goods Sold', '売上原価'), options: { fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray700, align: 'left', fontFace: CONFIG.fonts.primary } },
       { text: formatCurrency(inputData.cogs.current), options: { fontSize: CONFIG.fontSizes.table, align: 'right', fontFace: CONFIG.fonts.primary } },
       { text: formatCurrency(inputData.cogs.comparison), options: { fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray500, align: 'right', fontFace: CONFIG.fonts.primary } },
       { text: calculateVariance(inputData.cogs.current, inputData.cogs.comparison), options: { fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.positive, bold: true, align: 'right', fontFace: CONFIG.fonts.primary } }
@@ -1216,7 +1264,7 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
 
     // Gross Profit
     tableData.push([
-      { text: 'Gross Profit', options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray900, fill: CONFIG.colors.highlight, align: 'left', fontFace: CONFIG.fonts.primary } },
+      { text: t('Gross Profit', '売上総利益'), options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray900, fill: CONFIG.colors.highlight, align: 'left', fontFace: CONFIG.fonts.primary } },
       { text: formatCurrency(inputData.gross_profit.current), options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray900, fill: CONFIG.colors.highlight, align: 'right', fontFace: CONFIG.fonts.primary } },
       { text: formatCurrency(inputData.gross_profit.comparison), options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray700, fill: CONFIG.colors.highlight, align: 'right', fontFace: CONFIG.fonts.primary } },
       { text: calculateVariance(inputData.gross_profit.current, inputData.gross_profit.comparison), options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.primaryDark, fill: CONFIG.colors.highlight, align: 'right', fontFace: CONFIG.fonts.primary } }
@@ -1224,7 +1272,7 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
 
     // Operating Expenses header
     tableData.push([
-      { text: 'Operating Expenses', options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray700, fill: CONFIG.colors.gray50, align: 'left', colspan: 4, fontFace: CONFIG.fonts.primary } },
+      { text: t('Operating Expenses', '営業費用'), options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray700, fill: CONFIG.colors.gray50, align: 'left', colspan: 4, fontFace: CONFIG.fonts.primary } },
       { text: '', options: { fill: CONFIG.colors.gray50 } },
       { text: '', options: { fill: CONFIG.colors.gray50 } },
       { text: '', options: { fill: CONFIG.colors.gray50 } }
@@ -1242,7 +1290,7 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
 
     // Total Operating Expenses
     tableData.push([
-      { text: 'Total Operating Expenses', options: { fontSize: CONFIG.fontSizes.table, bold: true, color: CONFIG.colors.gray800, fill: CONFIG.colors.gray100, align: 'left', fontFace: CONFIG.fonts.primary } },
+      { text: t('Total Operating Expenses', '営業費用合計'), options: { fontSize: CONFIG.fontSizes.table, bold: true, color: CONFIG.colors.gray800, fill: CONFIG.colors.gray100, align: 'left', fontFace: CONFIG.fonts.primary } },
       { text: formatCurrency(inputData.operating_expenses.current), options: { fontSize: CONFIG.fontSizes.table, bold: true, fill: CONFIG.colors.gray100, align: 'right', fontFace: CONFIG.fonts.primary } },
       { text: formatCurrency(inputData.operating_expenses.comparison), options: { fontSize: CONFIG.fontSizes.table, bold: true, color: CONFIG.colors.gray500, fill: CONFIG.colors.gray100, align: 'right', fontFace: CONFIG.fonts.primary } },
       { text: calculateVariance(inputData.operating_expenses.current, inputData.operating_expenses.comparison), options: { fontSize: CONFIG.fontSizes.table, bold: true, color: CONFIG.colors.positive, fill: CONFIG.colors.gray100, align: 'right', fontFace: CONFIG.fonts.primary } }
@@ -1252,7 +1300,7 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
     const profitFromOps = inputData.gross_profit.current - inputData.operating_expenses.current;
     const profitFromOpsComparison = inputData.gross_profit.comparison - inputData.operating_expenses.comparison;
     tableData.push([
-      { text: 'Profit from Operations', options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray800, align: 'left', fontFace: CONFIG.fonts.primary } },
+      { text: t('Profit from Operations', '営業利益'), options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray800, align: 'left', fontFace: CONFIG.fonts.primary } },
       { text: formatCurrency(profitFromOps), options: { bold: true, fontSize: CONFIG.fontSizes.table, align: 'right', fontFace: CONFIG.fonts.primary } },
       { text: formatCurrency(profitFromOpsComparison), options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray500, align: 'right', fontFace: CONFIG.fonts.primary } },
       { text: calculateVariance(profitFromOps, profitFromOpsComparison), options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.positive, align: 'right', fontFace: CONFIG.fonts.primary } }
@@ -1260,7 +1308,7 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
 
     // Other Income
     tableData.push([
-      { text: 'Other Income', options: { fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray700, align: 'left', fontFace: CONFIG.fonts.primary } },
+      { text: t('Other Income', 'その他収益'), options: { fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray700, align: 'left', fontFace: CONFIG.fonts.primary } },
       { text: formatCurrency(inputData.other_income.current), options: { fontSize: CONFIG.fontSizes.table, align: 'right', fontFace: CONFIG.fonts.primary } },
       { text: formatCurrency(inputData.other_income.comparison), options: { fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray500, align: 'right', fontFace: CONFIG.fonts.primary } },
       { text: calculateVariance(inputData.other_income.current, inputData.other_income.comparison), options: { fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.positive, align: 'right', fontFace: CONFIG.fonts.primary } }
@@ -1270,7 +1318,7 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
     const profitBeforeFinance = profitFromOps + inputData.other_income.current;
     const profitBeforeFinanceComparison = profitFromOpsComparison + inputData.other_income.comparison;
     tableData.push([
-      { text: 'Profit Before Finance Costs', options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray800, align: 'left', fontFace: CONFIG.fonts.primary } },
+      { text: t('Profit Before Finance Costs', '金融費用控除前利益'), options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray800, align: 'left', fontFace: CONFIG.fonts.primary } },
       { text: formatCurrency(profitBeforeFinance), options: { bold: true, fontSize: CONFIG.fontSizes.table, align: 'right', fontFace: CONFIG.fonts.primary } },
       { text: formatCurrency(profitBeforeFinanceComparison), options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray500, align: 'right', fontFace: CONFIG.fonts.primary } },
       { text: calculateVariance(profitBeforeFinance, profitBeforeFinanceComparison), options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.positive, align: 'right', fontFace: CONFIG.fonts.primary } }
@@ -1278,7 +1326,7 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
 
     // Finance Costs
     tableData.push([
-      { text: 'Finance Costs', options: { fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray700, align: 'left', fontFace: CONFIG.fonts.primary } },
+      { text: t('Finance Costs', '金融費用'), options: { fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray700, align: 'left', fontFace: CONFIG.fonts.primary } },
       { text: formatCurrency(inputData.finance_costs.current), options: { fontSize: CONFIG.fontSizes.table, align: 'right', fontFace: CONFIG.fonts.primary } },
       { text: formatCurrency(inputData.finance_costs.comparison), options: { fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray500, align: 'right', fontFace: CONFIG.fonts.primary } },
       { text: calculateVariance(inputData.finance_costs.current, inputData.finance_costs.comparison), options: { fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.positive, align: 'right', fontFace: CONFIG.fonts.primary } }
@@ -1286,7 +1334,7 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
 
     // Profit Before Tax
     tableData.push([
-      { text: 'Profit Before Tax', options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray800, align: 'left', fontFace: CONFIG.fonts.primary } },
+      { text: t('Profit Before Tax', '税引前利益'), options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray800, align: 'left', fontFace: CONFIG.fonts.primary } },
       { text: formatCurrency(inputData.profit_before_tax.current), options: { bold: true, fontSize: CONFIG.fontSizes.table, align: 'right', fontFace: CONFIG.fonts.primary } },
       { text: formatCurrency(inputData.profit_before_tax.comparison), options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray500, align: 'right', fontFace: CONFIG.fonts.primary } },
       { text: calculateVariance(inputData.profit_before_tax.current, inputData.profit_before_tax.comparison), options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.positive, align: 'right', fontFace: CONFIG.fonts.primary } }
@@ -1294,7 +1342,7 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
 
     // Tax Expense
     tableData.push([
-      { text: 'Tax Expense', options: { fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray700, align: 'left', fontFace: CONFIG.fonts.primary } },
+      { text: t('Tax Expense', '法人税等'), options: { fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray700, align: 'left', fontFace: CONFIG.fonts.primary } },
       { text: formatCurrency(inputData.tax_expense.current), options: { fontSize: CONFIG.fontSizes.table, align: 'right', fontFace: CONFIG.fonts.primary } },
       { text: formatCurrency(inputData.tax_expense.comparison), options: { fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.gray500, align: 'right', fontFace: CONFIG.fonts.primary } },
       { text: calculateVariance(inputData.tax_expense.current, inputData.tax_expense.comparison), options: { fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.positive, align: 'right', fontFace: CONFIG.fonts.primary } }
@@ -1302,7 +1350,7 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
 
     // Profit After Tax
     tableData.push([
-      { text: 'Profit After Tax', options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.white, fill: CONFIG.colors.primary, align: 'left', fontFace: CONFIG.fonts.primary } },
+      { text: t('Profit After Tax', '当期純利益'), options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.white, fill: CONFIG.colors.primary, align: 'left', fontFace: CONFIG.fonts.primary } },
       { text: formatCurrency(inputData.profit_after_tax.current), options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.white, fill: CONFIG.colors.primary, align: 'right', fontFace: CONFIG.fonts.primary } },
       { text: formatCurrency(inputData.profit_after_tax.comparison), options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.white, fill: CONFIG.colors.primary, align: 'right', fontFace: CONFIG.fonts.primary } },
       { text: calculateVariance(inputData.profit_after_tax.current, inputData.profit_after_tax.comparison), options: { bold: true, fontSize: CONFIG.fontSizes.table, color: CONFIG.colors.white, fill: CONFIG.colors.primary, align: 'right', fontFace: CONFIG.fonts.primary } }
@@ -1340,7 +1388,7 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
 	    // ==================== SLIDE 3: DASHBOARD ====================
 	    const slide3 = pptx.addSlide();
 	    addSlideTitle(slide3, CONFIG.text.slide3Title);
-	    addSlideSubtitle(slide3, 'Key margins, income statement and year-on-year performance for the period.');
+	    addSlideSubtitle(slide3, t('Key margins, income statement and year-on-year performance for the period.', '主要利益率、損益計算書、前年同期との比較。'));
 
 // Calculate metrics
 	    const safeRevenue = Number(inputData.revenue.current) || 0;
@@ -1355,19 +1403,19 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
 	    const netProfitMargin = safeRevenue ? Math.round((safeProfitAfterTax / safeRevenue) * 100) : 0;
 
 	    // Period labels from the data (this is a year-on-year comparison)
-    const curLabel = extractPeriodLabel(inputData.current_period_label) || 'Current';
-    const priorLabel = extractPeriodLabel(inputData.comparison_period_label) || 'Prior Year';
+    const curLabel = extractPeriodLabel(inputData.current_period_label) || t('Current', '当期');
+    const priorLabel = extractPeriodLabel(inputData.comparison_period_label) || t('Prior Year', '前年同期');
 
     // Gauges — pushed below the subtitle to avoid overlap
     const gaugeRowY = 1.3;
-    addGaugeChart(slide3, pptx, { x: 0.5, y: gaugeRowY, value: grossProfitMargin, title: 'Gross Profit Margin', color: CONFIG.colors.primary, periodLabel: curLabel });
-    addGaugeChart(slide3, pptx, { x: 0.5 + CONFIG.slide3.gaugeSpacing, y: gaugeRowY, value: opexRatio, title: 'OPEX Ratio', color: CONFIG.colors.primaryDark, periodLabel: curLabel });
-    addGaugeChart(slide3, pptx, { x: 0.5 + CONFIG.slide3.gaugeSpacing * 2, y: gaugeRowY, value: operatingProfitMargin, title: 'Operating Profit Margin', color: CONFIG.colors.primary, periodLabel: curLabel });
-    addGaugeChart(slide3, pptx, { x: 0.5 + CONFIG.slide3.gaugeSpacing * 3, y: gaugeRowY, value: netProfitMargin, title: 'Net Profit Margin', color: CONFIG.colors.primaryDark, periodLabel: curLabel });
+    addGaugeChart(slide3, pptx, { x: 0.5, y: gaugeRowY, value: grossProfitMargin, title: t('Gross Profit Margin', '売上総利益率'), color: CONFIG.colors.primary, periodLabel: curLabel });
+    addGaugeChart(slide3, pptx, { x: 0.5 + CONFIG.slide3.gaugeSpacing, y: gaugeRowY, value: opexRatio, title: t('OPEX Ratio', '営業費用率'), color: CONFIG.colors.primaryDark, periodLabel: curLabel });
+    addGaugeChart(slide3, pptx, { x: 0.5 + CONFIG.slide3.gaugeSpacing * 2, y: gaugeRowY, value: operatingProfitMargin, title: t('Operating Profit Margin', '営業利益率'), color: CONFIG.colors.primary, periodLabel: curLabel });
+    addGaugeChart(slide3, pptx, { x: 0.5 + CONFIG.slide3.gaugeSpacing * 3, y: gaugeRowY, value: netProfitMargin, title: t('Net Profit Margin', '純利益率'), color: CONFIG.colors.primaryDark, periodLabel: curLabel });
 
     // ---- Income Statement table (right) — real figures, real OPEX items ----
     const opexItemsRaw = Array.isArray(inputData.operating_expenses.items) ? inputData.operating_expenses.items : [];
-    const sortedOpex = opexItemsRaw.map(it => ({ name: String(it.name || '').trim(), current: Number(it.current) || 0 }))
+    const sortedOpex = opexItemsRaw.map(it => ({ name: acct(String(it.name || '').trim()), current: Number(it.current) || 0 }))
       .filter(it => it.name && it.current)
       .sort((a, b) => b.current - a.current);
     const topOpex = sortedOpex.slice(0, 4);
@@ -1380,20 +1428,20 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
 
     const tableData3 = [];
     tableData3.push([
-      { text: 'Income Statement', options: { bold: true, fontSize: 10, fill: CONFIG.colors.gray800, color: CONFIG.colors.white, fontFace: CONFIG.fonts.primary } },
+      { text: t('Income Statement', '損益計算書'), options: { bold: true, fontSize: 10, fill: CONFIG.colors.gray800, color: CONFIG.colors.white, fontFace: CONFIG.fonts.primary } },
       { text: '', options: { fill: CONFIG.colors.gray800 } },
     ]);
     const isRows = [
-      ['Revenue', formatCurrency(inputData.revenue.current), false],
-      ['COGS', formatCurrency(inputData.cogs.current), false],
-      ['Gross Profit', formatCurrency(inputData.gross_profit.current), true],
-      ['Operating Expenses', formatCurrency(inputData.operating_expenses.current), true],
+      [t('Revenue', '売上高'), formatCurrency(inputData.revenue.current), false],
+      [t('COGS', '売上原価'), formatCurrency(inputData.cogs.current), false],
+      [t('Gross Profit', '売上総利益'), formatCurrency(inputData.gross_profit.current), true],
+      [t('Operating Expenses', '営業費用'), formatCurrency(inputData.operating_expenses.current), true],
     ];
     topOpex.forEach(it => isRows.push(['  ' + it.name, formatCurrency(it.current), false]));
-    if (otherOpex > 0) isRows.push(['  Other', formatCurrency(otherOpex), false]);
-    isRows.push(['Other Income', formatCurrency(inputData.other_income.current), false]);
-    isRows.push(['Finance Costs', formatCurrency(inputData.finance_costs.current), false]);
-    isRows.push(['Profit After Tax', formatCurrency(inputData.profit_after_tax.current), true]);
+    if (otherOpex > 0) isRows.push([t('  Other', '  その他'), formatCurrency(otherOpex), false]);
+    isRows.push([t('Other Income', 'その他収益'), formatCurrency(inputData.other_income.current), false]);
+    isRows.push([t('Finance Costs', '金融費用'), formatCurrency(inputData.finance_costs.current), false]);
+    isRows.push([t('Profit After Tax', '当期純利益'), formatCurrency(inputData.profit_after_tax.current), true]);
 
     isRows.forEach(([label, val, bold]) => {
       const bg = bold ? CONFIG.colors.gray100 : CONFIG.colors.white;
@@ -1410,14 +1458,14 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
     });
 
     // ---- Chart A: P&L current vs prior year (honest YoY, real values) ----
-    slide3.addText('Performance vs prior year', {
+    slide3.addText(t('Performance vs prior year', '前年同期との比較'), {
       x: 0.5, y: 2.65, w: 3.3, h: 0.25, fontSize: 10, bold: true,
       color: CONFIG.colors.gray800, fontFace: CONFIG.fonts.primary,
     });
     slide3.addChart(pptx.ChartType.bar, [
-      { name: curLabel, labels: ['Revenue', 'Gross Profit', 'Net Profit'],
+      { name: curLabel, labels: [t('Revenue', '売上高'), t('Gross Profit', '売上総利益'), t('Net Profit', '当期純利益')],
         values: [safeRevenue, safeGrossProfit, safeProfitAfterTax] },
-      { name: priorLabel, labels: ['Revenue', 'Gross Profit', 'Net Profit'],
+      { name: priorLabel, labels: [t('Revenue', '売上高'), t('Gross Profit', '売上総利益'), t('Net Profit', '当期純利益')],
         values: [Number(inputData.revenue.comparison) || 0, Number(inputData.gross_profit.comparison) || 0, Number(inputData.profit_after_tax.comparison) || 0] },
     ], {
       x: 0.4, y: 2.95, w: 3.35, h: 2.2,
@@ -1429,13 +1477,13 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
     });
 
     // ---- Chart B: operating expense breakdown (real line items) ----
-    slide3.addText('Operating expense breakdown', {
+    slide3.addText(t('Operating expense breakdown', '営業費用の内訳'), {
       x: 4.0, y: 2.65, w: 3.05, h: 0.25, fontSize: 10, bold: true,
       color: CONFIG.colors.gray800, fontFace: CONFIG.fonts.primary,
     });
     const clip = (nm) => nm.length > 20 ? nm.slice(0, 18) + '\u2026' : nm;
     const opexBars = topOpex.slice().reverse().map(it => ({ name: clip(it.name), current: it.current }));
-    if (otherOpex > 0) opexBars.unshift({ name: 'Other', current: otherOpex });
+    if (otherOpex > 0) opexBars.unshift({ name: t('Other', 'その他'), current: otherOpex });
     slide3.addChart(pptx.ChartType.bar, [
       { name: curLabel, labels: opexBars.map(b => b.name), values: opexBars.map(b => b.current) },
     ], {
@@ -1452,9 +1500,9 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
     // ==================== SLIDE 4: BUDGET VS ACTUAL ====================
 	    const slide4 = pptx.addSlide();
 	    addSlideTitle(slide4, CONFIG.text.slide4Title);
-	    addSlideSubtitle(slide4, `Revenue by shop against budget for ${extractPeriodLabel(inputData.current_period_label)}, with variance commentary.`);
+	    addSlideSubtitle(slide4, t(`Revenue by shop against budget for ${extractPeriodLabel(inputData.current_period_label)}, with variance commentary.`, `${extractPeriodLabel(inputData.current_period_label)}の店舗別売上高と予算差異、および差異の説明。`));
 
-slide4.addText('Amount in JPY', {
+slide4.addText(t('Amount in JPY', '単位：円'), {
 	      x: CONFIG.layout.marginLeft,
 	      y: 0.9,
 	      w: 2,
@@ -1471,18 +1519,18 @@ slide4.addText('Amount in JPY', {
 
 	    // Header
 	    tableData4.push([
-	      { text: 'Account No', options: { fontSize: 8, bold: true, fill: 'E4D4F4', fontFace: CONFIG.fonts.primary } },
-	      { text: 'Shop', options: { fontSize: 8, bold: true, fill: 'E4D4F4', fontFace: CONFIG.fonts.primary } },
-	      { text: 'Actual', options: { fontSize: 8, bold: true, fill: 'E4D4F4', fontFace: CONFIG.fonts.primary, align: 'right' } },
-	      { text: 'Budget', options: { fontSize: 8, bold: true, fill: 'E4D4F4', fontFace: CONFIG.fonts.primary, align: 'right' } },
-	      { text: 'Var', options: { fontSize: 8, bold: true, fill: 'E4D4F4', fontFace: CONFIG.fonts.primary, align: 'right' } },
-	      { text: 'Var%', options: { fontSize: 8, bold: true, fill: 'E4D4F4', fontFace: CONFIG.fonts.primary, align: 'right' } },
-	      { text: 'Explanation', options: { fontSize: 8, bold: true, fill: 'E4D4F4', fontFace: CONFIG.fonts.primary } },
+	      { text: t('Account No', '勘定科目番号'), options: { fontSize: 8, bold: true, fill: 'E4D4F4', fontFace: CONFIG.fonts.primary } },
+	      { text: t('Shop', '店舗'), options: { fontSize: 8, bold: true, fill: 'E4D4F4', fontFace: CONFIG.fonts.primary } },
+	      { text: t('Actual', '実績'), options: { fontSize: 8, bold: true, fill: 'E4D4F4', fontFace: CONFIG.fonts.primary, align: 'right' } },
+	      { text: t('Budget', '予算'), options: { fontSize: 8, bold: true, fill: 'E4D4F4', fontFace: CONFIG.fonts.primary, align: 'right' } },
+	      { text: t('Var', '差異'), options: { fontSize: 8, bold: true, fill: 'E4D4F4', fontFace: CONFIG.fonts.primary, align: 'right' } },
+	      { text: t('Var%', '差異率'), options: { fontSize: 8, bold: true, fill: 'E4D4F4', fontFace: CONFIG.fonts.primary, align: 'right' } },
+	      { text: t('Explanation', '説明'), options: { fontSize: 8, bold: true, fill: 'E4D4F4', fontFace: CONFIG.fonts.primary } },
 	    ]);
 
 	    // Revenue section header
 	    tableData4.push([
-	      { text: 'Revenue', options: { fontSize: 10, bold: true, fill: CONFIG.colors.primary, color: CONFIG.colors.white, fontFace: CONFIG.fonts.primary, colspan: 7 } },
+	      { text: t('Revenue', '売上高'), options: { fontSize: 10, bold: true, fill: CONFIG.colors.primary, color: CONFIG.colors.white, fontFace: CONFIG.fonts.primary, colspan: 7 } },
 	      { text: '', options: { fill: CONFIG.colors.primary } },
 	      { text: '', options: { fill: CONFIG.colors.primary } },
 	      { text: '', options: { fill: CONFIG.colors.primary } },
@@ -1512,10 +1560,11 @@ slide4.addText('Amount in JPY', {
 	      const varArrow = variance >= 0 ? '\u25b2' : '\u25bc';
 	      const nm = String(item.name || '').trim();
 	      const explanation = explByShop[nm.toLowerCase()] ||
-	        (budget === 0 ? 'No budget baseline for this line.'
+	        (budget === 0 ? t('No budget baseline for this line.', '予算の設定なし。')
 	          : (Math.abs(Number(variancePct)) < 10
-	              ? 'Within \u00b110% of budget; no commentary required.'
-	              : nm + ' came in ' + (variance >= 0 ? 'above' : 'below') + ' budget by ' + Math.abs(Number(variancePct)) + '% (' + formatCurrency(actual) + ' vs ' + formatCurrency(budget) + ').'));
+	              ? t('Within \u00b110% of budget; no commentary required.', '予算比±10%以内のため説明不要。')
+	              : t(nm + ' came in ' + (variance >= 0 ? 'above' : 'below') + ' budget by ' + Math.abs(Number(variancePct)) + '% (' + formatCurrency(actual) + ' vs ' + formatCurrency(budget) + ').',
+	                  `${nm}は予算を${Math.abs(Number(variancePct))}%${variance >= 0 ? '上回った' : '下回った'}（実績${formatCurrency(actual)}、予算${formatCurrency(budget)}）。`)));
 	      tableData4.push([
 	        { text: glAccounts[idx] || '', options: { fontSize: 8, fontFace: CONFIG.fonts.primary } },
 	        { text: nm, options: { fontSize: 8, fontFace: CONFIG.fonts.primary } },
@@ -1535,7 +1584,7 @@ slide4.addText('Amount in JPY', {
 	    const revArrow = revVar >= 0 ? '▲' : '▼';
 
 	    tableData4.push([
-	      { text: 'Total Revenue', options: { fontSize: 8, bold: true, fill: CONFIG.colors.gray100, fontFace: CONFIG.fonts.primary, colspan: 2 } },
+	      { text: t('Total Revenue', '売上高合計'), options: { fontSize: 8, bold: true, fill: CONFIG.colors.gray100, fontFace: CONFIG.fonts.primary, colspan: 2 } },
 	      { text: formatCurrency(inputData.revenue.current), options: { fontSize: 8, bold: true, fill: CONFIG.colors.gray100, fontFace: CONFIG.fonts.primary, align: 'right' } },
 	      { text: formatCurrency(budgetRevTotal), options: { fontSize: 8, bold: true, fill: CONFIG.colors.gray100, fontFace: CONFIG.fonts.primary, align: 'right' } },
 	      { text: formatCurrency(revVar), options: { fontSize: 8, bold: true, fill: CONFIG.colors.gray100, fontFace: CONFIG.fonts.primary, align: 'right', color: revVarColor } },
@@ -1566,7 +1615,7 @@ slide4.addText('Amount in JPY', {
 
 	    addBudgetChart(slide4, pptx, {
 	      x: 0.5,
-	      title: 'Revenue vs Budget',
+	      title: t('Revenue vs Budget', '売上高（対予算）'),
 	      subtitle: `$${Math.round((Number(inputData.revenue.current) || 0) / 1000000)}M`,
 	      actual: Number(inputData.revenue.current) || 0,
 	      budget: budgetRev,
@@ -1575,7 +1624,7 @@ slide4.addText('Amount in JPY', {
 
 	    addBudgetChart(slide4, pptx, {
 	      x: 3.83,
-	      title: 'Gross Profit vs Budget',
+	      title: t('Gross Profit vs Budget', '売上総利益（対予算）'),
 	      subtitle: `$${Math.round((Number(inputData.gross_profit.current) || 0) / 1000000)}M`,
 	      actual: Number(inputData.gross_profit.current) || 0,
 	      budget: budgetGP,
@@ -1584,7 +1633,7 @@ slide4.addText('Amount in JPY', {
 
 	    addBudgetChart(slide4, pptx, {
 	      x: 7.15,
-	      title: 'Profit After Tax vs Budget',
+	      title: t('Profit After Tax vs Budget', '当期純利益（対予算）'),
 	      subtitle: `$${Math.round((Number(inputData.profit_after_tax.current) || 0) / 1000000)}M`,
 	      actual: Number(inputData.profit_after_tax.current) || 0,
 	      budget: budgetProfit,
@@ -1604,6 +1653,7 @@ slide4.addText('Amount in JPY', {
 
     let pptxBase64 = await pptx.write('base64');
     if (usedNativeWaterfall) pptxBase64 = await patchWaterfallCharts(pptxBase64, usedNativeWaterfall.deltaLabels, CONFIG.fonts.primary);
+    pptxBase64 = await applyEastAsianFont(pptxBase64, JA);
     const safeCompany = String(inputData.company_name || 'Company');
     const filename = `${CONFIG.metadata.filenamePrefix}_${safeCompany.replace(/[^a-z0-9]/gi, '_')}.pptx`;
     
@@ -1650,6 +1700,7 @@ app.post('/generate-pptx', async (req, res) => {
       chartData,
       shopCommentary,
       executiveSummary,
+      language: body.language,
     });
 
     // Persist the pptx to disk so you can see it in the output folder
@@ -1743,7 +1794,7 @@ app.get('/d/:id/:filename', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', version: 'three-way-2', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', version: 'bilingual-1', timestamp: new Date().toISOString() });
 });
 
 // Web front end (config + run-workflow UI), served at the root.
