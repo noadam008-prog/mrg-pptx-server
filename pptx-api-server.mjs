@@ -151,6 +151,8 @@ function normalizeFinancialData(raw) {
     profit_after_tax: normalizeMetric(profit_after_tax_src),
     // Pass through any budget payload if already present (optional)
     budget_data: d.budget_data ?? d.budgetData ?? {},
+    // n8n v2: Actual / Budget / Prior Year lines. Its presence switches on the v2 slides.
+    three_way: d.three_way ?? null,
   };
 
   // Ensure required nested structures for slide 2 logic
@@ -262,7 +264,7 @@ async function patchWaterfallCharts(pptxBase64, deltaLabels, fontFace) {
 // ============================================================================
 
 async function generatePresentation(config) {
-  const { pptxConfig, financialData, coverImageUrl, chartImageUrl, chartData, shopCommentary } = config;
+  const { pptxConfig, financialData, coverImageUrl, chartImageUrl, chartData, shopCommentary, executiveSummary } = config;
   
   // Configuration loading
   const cfg = pptxConfig || {};
@@ -786,6 +788,219 @@ async function generatePresentation(config) {
   }
 
   // ============================================================================
+  // V2 SLIDES (only when financialData.three_way is sent): executive summary,
+  // three-way P&L and OPEX deep-dive. Even font sizes only (10/12/14/16/20/24).
+  // ============================================================================
+
+  const TW = inputData.three_way && Array.isArray(inputData.three_way.lines) ? inputData.three_way : null;
+  const V2 = { body: 12, small: 10, point: 14, headline: 16, kpi: 24 };
+  const isNum = (n) => typeof n === 'number' && Number.isFinite(n);
+  const pctChange = (a, b) => (isNum(a) && isNum(b) && b !== 0 ? ((a - b) / Math.abs(b)) * 100 : null);
+  const fmtPct = (p) => (p === null ? '–' : `${p >= 0 ? '+' : '−'}${Math.abs(p).toFixed(1)}%`);
+  const fmtAmt = (n) => (isNum(n) ? formatCurrency(n) : '–');
+  const fmtDiff = (n) => (isNum(n) ? `${n >= 0 ? '+' : '−'}${formatCurrency(Math.abs(n))}` : '–');
+  // Cost lines are favourable when they come in below the comparison.
+  const varColor = (p, cost) => (p === null || p === 0 ? CONFIG.colors.gray700 : ((p > 0) !== !!cost ? CONFIG.colors.positive : CONFIG.colors.negative));
+  const twLine = (key) => (TW ? TW.lines.find(l => l.key === key) : null) || { actual: 0, budget: null, prior: null };
+  const twPeriod = extractPeriodLabel(inputData.current_period_label) || 'Current';
+  const twPriorPeriod = extractPeriodLabel(inputData.comparison_period_label) || 'Prior Year';
+
+  function addV2Takeaways(slide, pptx, texts) {
+    addKeyTakeaways(slide, pptx, texts.slice(0, 3));
+  }
+
+  // Computed fallback when the AI summary is missing or unparseable.
+  function computedSummary() {
+    const rev = twLine('revenue'), op = twLine('operating_profit'), pat = twLine('profit_after_tax'), opex = twLine('operating_expenses');
+    const items = TW.opex_items || [];
+    const top = [...items].sort((a, b) => b.actual - a.actual)[0];
+    const revGrowth = pctChange(rev.actual, rev.prior);
+    const fastCosts = items
+      .filter(it => opex.actual && it.actual / opex.actual >= 0.05)
+      .map(it => ({ ...it, g: pctChange(it.actual, it.prior) }))
+      .filter(it => it.g !== null && revGrowth !== null && it.g > revGrowth)
+      .sort((a, b) => b.actual - a.actual);
+    return {
+      headline: `Revenue ${fmtAmt(rev.actual)}: ${fmtPct(pctChange(rev.actual, rev.budget))} vs budget, ${fmtPct(revGrowth)} vs prior year.`,
+      points: [
+        { title: 'Against budget', text: `Revenue ${fmtPct(pctChange(rev.actual, rev.budget))}, operating profit ${fmtPct(pctChange(op.actual, op.budget))} and profit after tax ${fmtPct(pctChange(pat.actual, pat.budget))} vs budget.` },
+        { title: 'Against prior year', text: `Revenue ${fmtPct(revGrowth)} and profit after tax ${fmtPct(pctChange(pat.actual, pat.prior))} vs ${twPriorPeriod}.` },
+        { title: 'Costs and margin', text: `Operating expenses ${fmtAmt(opex.actual)} (${fmtPct(pctChange(opex.actual, opex.budget))} vs budget)${top && opex.actual ? `; ${top.name} is ${Math.round((top.actual / opex.actual) * 100)}% of the total` : ''}.` },
+      ],
+      watch: [
+        ...items
+          .map(it => ({ ...it, vb: pctChange(it.actual, it.budget) }))
+          .filter(it => it.vb !== null && it.vb >= 10 && opex.actual && it.actual / opex.actual >= 0.02)
+          .sort((a, b) => (b.actual - b.budget) - (a.actual - a.budget))
+          .map(it => `${it.name} is ${fmtPct(it.vb)} over budget (${fmtAmt(it.actual)} vs ${fmtAmt(it.budget)}).`),
+        ...fastCosts.map(it => `${it.name} grew ${fmtPct(it.g)} vs prior year, faster than revenue (${fmtPct(revGrowth)}).`),
+      ].slice(0, 3),
+      computed: true,
+    };
+  }
+
+  function addExecutiveSummarySlide(pptx) {
+    const ai = executiveSummary && Array.isArray(executiveSummary.points) && executiveSummary.points.length ? executiveSummary : null;
+    const s = ai || computedSummary();
+    const slide = pptx.addSlide();
+    addSlideTitle(slide, 'Executive summary');
+    slide.addText(s.headline || '', {
+      x: CONFIG.layout.marginLeft, y: 0.6, w: 9, h: 0.6,
+      fontSize: V2.headline, bold: true, color: CONFIG.colors.primaryDark, fontFace: CONFIG.fonts.primary, valign: 'top',
+    });
+
+    // KPI tiles: one shape + one multi-run text box each
+    const tiles = [['Revenue', twLine('revenue')], ['Operating profit', twLine('operating_profit')], ['Profit after tax', twLine('profit_after_tax')]];
+    tiles.forEach(([label, l], i) => {
+      const x = CONFIG.layout.marginLeft + i * 3.05;
+      const vb = pctChange(l.actual, l.budget), vp = pctChange(l.actual, l.prior);
+      slide.addShape(pptx.ShapeType.rect, { x, y: 1.3, w: 2.9, h: 0.95, fill: { color: CONFIG.colors.gray50 }, line: { color: 'D1D5DB', width: 1 } });
+      slide.addText([
+        { text: `${label} (${twPeriod})`, options: { fontSize: V2.small, color: CONFIG.colors.gray500, breakLine: true } },
+        { text: fmtAmt(l.actual), options: { fontSize: V2.kpi, bold: true, color: CONFIG.colors.gray900, breakLine: true } },
+        { text: `vs budget ${fmtPct(vb)}`, options: { fontSize: V2.small, bold: true, color: varColor(vb, false) } },
+        { text: '   ', options: { fontSize: V2.small } },
+        { text: `vs prior year ${fmtPct(vp)}`, options: { fontSize: V2.small, bold: true, color: varColor(vp, false) } },
+      ], { x: x + 0.12, y: 1.32, w: 2.7, h: 0.9, fontFace: CONFIG.fonts.primary, valign: 'middle', margin: 0 });
+    });
+
+    // Key messages (left) and watch items (right)
+    s.points.slice(0, 3).forEach((p, i) => {
+      slide.addText([
+        { text: `${i + 1}. ${p.title}`, options: { fontSize: V2.point, bold: true, color: CONFIG.colors.gray900, breakLine: true } },
+        { text: p.text, options: { fontSize: V2.body, color: CONFIG.colors.gray700 } },
+      ], { x: CONFIG.layout.marginLeft, y: 2.45 + i * 0.82, w: 5.9, h: 0.78, fontFace: CONFIG.fonts.primary, valign: 'top', margin: 0 });
+    });
+    const watch = (s.watch || []).slice(0, 3);
+    slide.addShape(pptx.ShapeType.rect, { x: 6.65, y: 2.45, w: 2.85, h: 2.5, fill: { color: CONFIG.colors.takeawayBg }, line: { type: 'none' } });
+    slide.addText([
+      { text: 'Watch items', options: { fontSize: V2.point, bold: true, color: CONFIG.colors.gray900, breakLine: true } },
+      ...(watch.length
+        ? watch.map((w, i) => ({ text: w, options: { fontSize: V2.body, color: CONFIG.colors.gray700, bullet: { indent: 12 }, breakLine: i < watch.length - 1, paraSpaceBefore: 6 } }))
+        : [{ text: 'No items flagged.', options: { fontSize: V2.body, color: CONFIG.colors.gray500 } }]),
+    ], { x: 6.8, y: 2.55, w: 2.6, h: 2.3, fontFace: CONFIG.fonts.primary, valign: 'top', margin: 0 });
+
+    slide.addText(ai ? 'AI-drafted from the reported figures. Review before distribution.' : 'Computed from the reported figures (AI summary unavailable for this run).', {
+      x: CONFIG.layout.marginLeft, y: 5.15, w: 9, h: 0.3, fontSize: V2.small, color: CONFIG.colors.gray500, fontFace: CONFIG.fonts.primary,
+    });
+  }
+
+  function addThreeWaySlide(pptx) {
+    const slide = pptx.addSlide();
+    addSlideTitle(slide, 'P&L: actual vs budget vs prior year');
+    addSlideSubtitle(slide, `${twPeriod} actual against budget and against ${twPriorPeriod}. Green = favourable, red = unfavourable (lower costs count as favourable).`);
+
+    const head = ['', 'Actual', 'Budget', 'vs Bud', 'vs Bud %', 'Prior Year', 'vs PY %'];
+    const rows = [head.map((h, i) => ({ text: h, options: { bold: true, fontSize: V2.small, color: CONFIG.colors.white, fill: CONFIG.colors.tableHeaderBg, align: i ? 'right' : 'left' } }))];
+    TW.lines.forEach(l => {
+      const vb = pctChange(l.actual, l.budget), vp = pctChange(l.actual, l.prior);
+      const fill = l.subtotal ? CONFIG.colors.gray100 : CONFIG.colors.white;
+      const base = { fontSize: V2.small, fill, bold: !!l.subtotal, align: 'right' };
+      rows.push([
+        { text: l.label, options: { ...base, align: 'left', color: CONFIG.colors.gray800 } },
+        { text: fmtAmt(l.actual), options: { ...base, color: CONFIG.colors.gray900 } },
+        { text: fmtAmt(l.budget), options: { ...base, color: CONFIG.colors.gray500 } },
+        { text: isNum(l.budget) ? fmtDiff(l.actual - l.budget) : '–', options: { ...base, color: varColor(vb, l.cost) } },
+        { text: fmtPct(vb), options: { ...base, color: varColor(vb, l.cost) } },
+        { text: fmtAmt(l.prior), options: { ...base, color: CONFIG.colors.gray500 } },
+        { text: fmtPct(vp), options: { ...base, color: varColor(vp, l.cost) } },
+      ]);
+    });
+    slide.addTable(rows, {
+      x: CONFIG.layout.marginLeft, y: 1.05, w: 6.0, colW: [1.36, 0.78, 0.78, 0.72, 0.76, 0.82, 0.78], rowH: 0.3,
+      border: { pt: CONFIG.tables.borderWidth, color: CONFIG.tables.borderColor },
+      margin: [0.02, 0.06, 0.02, 0.06], fontFace: CONFIG.fonts.primary, valign: 'middle', autoPage: false,
+    });
+
+    const shops = TW.revenue_items || [];
+    slide.addChart(pptx.ChartType.bar, [
+      { name: 'Actual', labels: shops.map(s => s.name), values: shops.map(s => s.actual || 0) },
+      { name: 'Budget', labels: shops.map(s => s.name), values: shops.map(s => s.budget || 0) },
+      { name: 'Prior Year', labels: shops.map(s => s.name), values: shops.map(s => s.prior || 0) },
+    ], {
+      x: 6.65, y: 1.0, w: 3.0, h: 3.45, barDir: 'col', barGrouping: 'clustered', barGapWidthPct: 60,
+      chartColors: [CONFIG.colors.primaryDark, '9CA3AF', 'D1D5DB'],
+      showTitle: true, title: 'Revenue by shop', titleFontSize: V2.small, titleColor: CONFIG.colors.gray700, titleFontFace: CONFIG.fonts.primary,
+      showLegend: true, legendPos: 'b', legendFontSize: V2.small, legendFontFace: CONFIG.fonts.primary,
+      catAxisLabelFontSize: V2.small, catAxisLabelFontFace: CONFIG.fonts.primary,
+      valAxisLabelFontSize: V2.small, valAxisLabelFormatCode: '#,##0,"k"',
+      valGridLine: { style: 'solid', color: CONFIG.charts.gridColor, size: 1 },
+    });
+
+    const rev = twLine('revenue'), pat = twLine('profit_after_tax');
+    const best = [...shops].map(s => ({ ...s, vb: pctChange(s.actual, s.budget) })).filter(s => s.vb !== null).sort((a, b) => b.vb - a.vb)[0];
+    addV2Takeaways(slide, pptx, [
+      `Revenue ${fmtPct(pctChange(rev.actual, rev.budget))} vs budget, ${fmtPct(pctChange(rev.actual, rev.prior))} vs prior year.`,
+      `Profit after tax ${fmtPct(pctChange(pat.actual, pat.budget))} vs budget.`,
+      best ? `${best.name}: largest beat vs budget (${fmtPct(best.vb)}).` : 'No shop-level budget available.',
+    ]);
+  }
+
+  function addOpexDeepDiveSlide(pptx) {
+    const slide = pptx.addSlide();
+    addSlideTitle(slide, 'Operating expenses deep-dive');
+    addSlideSubtitle(slide, `Operating expense lines for ${twPeriod}, largest first (PY = ${twPriorPeriod}). Highlighted: 10% or more off budget and at least 2% of total OPEX.`);
+
+    const opex = twLine('operating_expenses'), rev = twLine('revenue');
+    const items = [...(TW.opex_items || [])].sort((a, b) => b.actual - a.actual);
+    const head = ['', 'Actual', 'Budget', 'vs Bud', 'PY', 'vs PY', '% rev'];
+    const rows = [head.map((h, i) => ({ text: h, options: { bold: true, fontSize: V2.small, color: CONFIG.colors.white, fill: CONFIG.colors.tableHeaderBg, align: i ? 'right' : 'left' } }))];
+    const row = (name, l, opts = {}) => {
+      const vb = pctChange(l.actual, l.budget), vp = pctChange(l.actual, l.prior);
+      const flagged = !opts.total && vb !== null && Math.abs(vb) >= 10 && opex.actual && l.actual / opex.actual >= 0.02;
+      const fill = opts.total ? CONFIG.colors.gray100 : (flagged ? 'FEF3C7' : CONFIG.colors.white);
+      const base = { fontSize: V2.small, fill, bold: !!opts.total || flagged, align: 'right' };
+      return [
+        { text: name, options: { ...base, align: 'left', color: CONFIG.colors.gray800 } },
+        { text: fmtAmt(l.actual), options: { ...base, color: CONFIG.colors.gray900 } },
+        { text: fmtAmt(l.budget), options: { ...base, color: CONFIG.colors.gray500 } },
+        { text: fmtPct(vb), options: { ...base, color: varColor(vb, true) } },
+        { text: fmtAmt(l.prior), options: { ...base, color: CONFIG.colors.gray500 } },
+        { text: fmtPct(vp), options: { ...base, color: varColor(vp, true) } },
+        { text: rev.actual ? `${((l.actual / rev.actual) * 100).toFixed(1)}%` : '–', options: { ...base, color: CONFIG.colors.gray700 } },
+      ];
+    };
+    // Largest 9 lines, the rest folded into one row so the table never runs into the takeaways
+    const shown = items.length > 10 ? items.slice(0, 9) : items;
+    const rest = items.slice(shown.length);
+    shown.forEach(it => rows.push(row(it.name, it)));
+    if (rest.length) {
+      const sum = (k) => (rest.every(it => isNum(it[k])) ? rest.reduce((t, it) => t + it[k], 0) : null);
+      rows.push(row(`Other (${rest.length} lines)`, { actual: sum('actual'), budget: sum('budget'), prior: sum('prior') }));
+    }
+    rows.push(row('Total operating expenses', opex, { total: true }));
+    const rowH = 0.26;
+    slide.addTable(rows, {
+      x: CONFIG.layout.marginLeft, y: 1.05, w: 6.06, colW: [2.1, 0.7, 0.7, 0.64, 0.7, 0.66, 0.56], rowH,
+      border: { pt: CONFIG.tables.borderWidth, color: CONFIG.tables.borderColor },
+      margin: [0.01, 0.06, 0.01, 0.06], fontFace: CONFIG.fonts.primary, valign: 'middle', autoPage: false,
+    });
+
+    const top = items.slice(0, 5).reverse();
+    slide.addChart(pptx.ChartType.bar, [
+      { name: 'Actual', labels: top.map(t => t.name), values: top.map(t => t.actual || 0) },
+      { name: 'Budget', labels: top.map(t => t.name), values: top.map(t => t.budget || 0) },
+    ], {
+      x: 6.65, y: 1.0, w: 3.0, h: 3.45, barDir: 'bar', barGrouping: 'clustered', barGapWidthPct: 50,
+      chartColors: [CONFIG.colors.primaryDark, '9CA3AF'],
+      showTitle: true, title: 'Top 5 lines: actual vs budget', titleFontSize: V2.small, titleColor: CONFIG.colors.gray700, titleFontFace: CONFIG.fonts.primary,
+      showLegend: true, legendPos: 'b', legendFontSize: V2.small, legendFontFace: CONFIG.fonts.primary,
+      catAxisLabelFontSize: V2.small, catAxisLabelFontFace: CONFIG.fonts.primary,
+      valAxisLabelFontSize: V2.small, valAxisLabelFormatCode: '#,##0,"k"',
+      valGridLine: { style: 'solid', color: CONFIG.charts.gridColor, size: 1 },
+    });
+
+    const biggest = items[0];
+    const ratio = (l) => (l.actual && rev.actual ? (l.actual / rev.actual) * 100 : null);
+    const ratioPrior = opex.prior && rev.prior ? (opex.prior / rev.prior) * 100 : null;
+    addV2Takeaways(slide, pptx, [
+      biggest && opex.actual ? `${biggest.name}: ${Math.round((biggest.actual / opex.actual) * 100)}% of OPEX.` : 'No OPEX lines found.',
+      `OPEX ${fmtPct(pctChange(opex.actual, opex.budget))} vs budget (${fmtDiff(isNum(opex.budget) ? opex.actual - opex.budget : null)}).`,
+      `OPEX ratio ${ratio(opex) === null ? '–' : ratio(opex).toFixed(1) + '%'} of revenue (prior year ${ratioPrior === null ? '–' : ratioPrior.toFixed(1) + '%'}).`,
+    ]);
+  }
+
+  // ============================================================================
   // MAIN PRESENTATION GENERATION (Slides 2-4 continue...)
   // I'll include the complete generation code in the next section
   // ============================================================================
@@ -799,6 +1014,7 @@ async function generatePresentation(config) {
 
     // SLIDE 1: COVER
     await addCoverSlide(pptx, inputData, COVER_IMAGE_URL);
+    if (TW) addExecutiveSummarySlide(pptx);
 
     // SLIDE 2: KEY FINANCIALS
     const slide2 = pptx.addSlide();
@@ -1119,6 +1335,8 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
     ]);
 
 
+    if (TW) addThreeWaySlide(pptx);
+
 	    // ==================== SLIDE 3: DASHBOARD ====================
 	    const slide3 = pptx.addSlide();
 	    addSlideTitle(slide3, CONFIG.text.slide3Title);
@@ -1228,6 +1446,8 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
       valGridLine: { style: 'solid', color: CONFIG.charts.gridColor, size: 1 },
       catAxisLabelFontSize: 7, valAxisLabelFontSize: 6,
     });
+
+    if (TW) addOpexDeepDiveSlide(pptx);
 
     // ==================== SLIDE 4: BUDGET VS ACTUAL ====================
 	    const slide4 = pptx.addSlide();
@@ -1421,6 +1641,7 @@ app.post('/generate-pptx', async (req, res) => {
     const chartImageUrl = body.chartImageUrl || body.chart_image_url || null;
     const chartData = safeJsonParse(body.chart_data ?? body.chartData ?? null, 2);
     const shopCommentary = safeJsonParse(body.shop_commentary ?? body.shopCommentary ?? null, 2);
+    const executiveSummary = safeJsonParse(body.executive_summary ?? body.executiveSummary ?? null, 2);
 
     const result = await generatePresentation({
       pptxConfig,
@@ -1429,6 +1650,7 @@ app.post('/generate-pptx', async (req, res) => {
       chartImageUrl,
       chartData,
       shopCommentary,
+      executiveSummary,
     });
 
     // Persist the pptx to disk so you can see it in the output folder
@@ -1522,7 +1744,7 @@ app.get('/d/:id/:filename', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', version: 'native-waterfall-1', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', version: 'three-way-1', timestamp: new Date().toISOString() });
 });
 
 // Web front end (config + run-workflow UI), served at the root.

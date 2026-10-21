@@ -4,7 +4,7 @@ name: Publish image to GHCR
 
 on:
   push:
-    branches: [n8n-azure-v1]
+    branches: [n8n-azure-v1, n8n-azure-v2]
   workflow_dispatch:
 
 permissions:
