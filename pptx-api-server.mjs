@@ -784,8 +784,10 @@ async function generatePresentation(config) {
       x: 0, y: 0, w: SLIDE_W, h: SLIDE_H,
     });
 
-    slide.addText(t("Monthly\nFinancials\nMetrics", "月次\n業績\nレポート"), {
-      x: sx(CONFIG.cover.titleX), y: sx(CONFIG.cover.titleY), w: sx(5.85), h: sx(3.40),
+    // Japanese title on one line: widened to the left (still inside the green panel) and never wrapped
+    slide.addText(t("Monthly\nFinancials\nMetrics", "月次業績レポート"), {
+      x: sx(CONFIG.cover.titleX) - (JA ? 0.8 : 0), y: sx(CONFIG.cover.titleY), w: sx(5.85) + (JA ? 0.8 : 0), h: sx(3.40),
+      ...(JA ? { wrap: false } : {}),
       fontFace: CONFIG.fonts.primary,
       fontSize: even(CONFIG.cover.titleFontSize * S),
       color: CONFIG.colors.white,
@@ -1794,7 +1796,7 @@ app.get('/d/:id/:filename', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', version: 'bilingual-1', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', version: 'bilingual-2', timestamp: new Date().toISOString() });
 });
 
 // Web front end (config + run-workflow UI), served at the root.
