@@ -287,10 +287,10 @@ async function generatePresentation(config) {
     fontSizes: {
       title: globalStyles.font_size_title || 20,
       subtitle: globalStyles.font_size_subtitle || 10,
-      table: globalStyles.font_size_table || 9,
-      small: globalStyles.font_size_small || 7,
+      table: globalStyles.font_size_table || 8,
+      small: globalStyles.font_size_small || 8,
       chartLabel: globalStyles.font_size_chart_label || 8,
-      chartLegend: globalStyles.font_size_chart_legend || 7,
+      chartLegend: globalStyles.font_size_chart_legend || 8,
       takeaway: globalStyles.font_size_takeaway || 10,
       kpi: globalStyles.font_size_kpi || 12
     },
@@ -523,17 +523,25 @@ async function generatePresentation(config) {
     return (variance >= 0 ? '+ ' : '') + variance.toFixed(0) + '%';
   }
 
-  function extractPeriodLabel(label) {
+  // "Posting periods 001/2025 to 003/2025" -> "Jan–Mar 2025" (a single period -> "Mar 2025").
+  function periodRange(label, months) {
     const s = String(label ?? '');
-    const match = s.match(/to\s+(\d{3})\/(\d{4})/);
-    if (match) {
-      const period = parseInt(match[1]);
-      const year = match[2];
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      return `${months[period - 1]} ${year}`;
+    const m = s.match(/(\d{3})\/(\d{4})\s*to\s*(\d{3})\/(\d{4})/i);
+    const name = (p) => months[parseInt(p, 10) - 1];
+    if (m && name(m[1]) && name(m[3])) {
+      if (m[1] === m[3] && m[2] === m[4]) return `${name(m[3])} ${m[4]}`;
+      if (m[2] === m[4]) return `${name(m[1])}–${name(m[3])} ${m[4]}`;
+      return `${name(m[1])} ${m[2]}–${name(m[3])} ${m[4]}`;
     }
-    return s;
+    const one = s.match(/(\d{3})\/(\d{4})/);
+    return one && name(one[1]) ? `${name(one[1])} ${one[2]}` : '';
   }
+
+  function extractPeriodLabel(label) {
+    return periodRange(label, ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']) || String(label ?? '');
+  }
+
+  const even = (n) => 2 * Math.round(n / 2);
 
   function addSlideTitle(slide, text) {
     slide.addText(text, {
@@ -660,7 +668,7 @@ async function generatePresentation(config) {
       align: 'center'
     });
     
-    slide.addText(options.periodLabel || 'Mar. 2025', {
+    slide.addText(options.periodLabel || '', {
       x, y: y + 0.95, w, h: 0.15,
       fontSize: CONFIG.fontSizes.small,
       color: CONFIG.colors.gray500,
@@ -688,11 +696,11 @@ async function generatePresentation(config) {
     });
     slide.addText(formatCurrency(actual), {
       x: x + 0.18, y: 4.78, w: 1.7, h: 0.34,
-      fontSize: 15, bold: true, color: CONFIG.colors.gray900, fontFace: CONFIG.fonts.primary, valign: 'middle',
+      fontSize: 16, bold: true, color: CONFIG.colors.gray900, fontFace: CONFIG.fonts.primary, valign: 'middle',
     });
     slide.addText(`${varPct >= 0 ? '\u25b2' : '\u25bc'} ${Math.abs(varPct)}%`, {
       x: x + 1.75, y: 4.78, w: 0.95, h: 0.34,
-      fontSize: 11, bold: true, align: 'right', valign: 'middle',
+      fontSize: 12, bold: true, align: 'right', valign: 'middle',
       color: varPct >= 0 ? CONFIG.colors.positive : CONFIG.colors.negative, fontFace: CONFIG.fonts.primary,
     });
     slide.addText(`vs Budget ${formatCurrency(budget)}`, {
@@ -734,16 +742,8 @@ async function generatePresentation(config) {
     const S = SLIDE_W / BASE_W;
     const sx = (v) => Number((v * S).toFixed(4));
 
-    const periodLong = (() => {
-      const label = String(inputData.current_period_label || '').trim();
-      const m = label.match(/to\s*(\d{3})\/(\d{4})/i) || label.match(/(\d{3})\/(\d{4})/);
-      if (!m) return '';
-      const period = parseInt(m[1], 10);
-      const year = m[2];
-      const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-      if (!period || period < 1 || period > 12) return '';
-      return `${months[period - 1]} ${year}`;
-    })();
+    const periodLong = periodRange(inputData.current_period_label,
+      ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']);
 
     slide.addImage({
       data: svgToDataUriCover(await buildCoverBackgroundSvg(coverImageUrl)),
@@ -753,7 +753,7 @@ async function generatePresentation(config) {
     slide.addText("Monthly\nFinancials\nMetrics", {
       x: sx(CONFIG.cover.titleX), y: sx(CONFIG.cover.titleY), w: sx(5.85), h: sx(3.40),
       fontFace: CONFIG.fonts.primary,
-      fontSize: Math.round(CONFIG.cover.titleFontSize * S),
+      fontSize: even(CONFIG.cover.titleFontSize * S),
       color: CONFIG.colors.white,
       bold: true,
       align: "right",
@@ -769,7 +769,7 @@ async function generatePresentation(config) {
     slide.addText(inputData.company_name || "Your Company Name", {
       x: sx(CONFIG.cover.titleX), y: sx(5.78), w: sx(5.85), h: sx(0.40),
       fontFace: CONFIG.fonts.primary,
-      fontSize: Math.round(18 * S),
+      fontSize: even(18 * S),
       color: CONFIG.colors.white,
       align: "right",
       valign: "top",
@@ -779,7 +779,7 @@ async function generatePresentation(config) {
       slide.addText(periodLong, {
         x: sx(CONFIG.cover.titleX), y: sx(6.08), w: sx(5.85), h: sx(0.35),
         fontFace: CONFIG.fonts.primary,
-        fontSize: Math.round(16 * S),
+        fontSize: even(16 * S),
         color: CONFIG.colors.white,
         align: "right",
         valign: "top",
@@ -1021,9 +1021,9 @@ async function generatePresentation(config) {
     let usedNativeWaterfall = null;
     addSlideTitle(slide2, CONFIG.text.slide2Title);
     
-    const currentLabel = String(inputData.current_period_label || '').replace('Posting periods ', '').replace(' to ', '-');
-    const comparisonLabel = String(inputData.comparison_period_label || '').replace('Posting periods ', '').replace(' to ', '-');
-    addSlideSubtitle(slide2, `Financial overview comparing ${currentLabel} vs ${comparisonLabel}. This slide showcases income statement to analyze overall growth of business and plan expenses for upcoming periods.`);
+    const currentLabel = extractPeriodLabel(inputData.current_period_label);
+    const comparisonLabel = extractPeriodLabel(inputData.comparison_period_label);
+    addSlideSubtitle(slide2, `Income statement and P&L bridge, ${currentLabel} vs ${comparisonLabel}.`);
 
     const chartImageDataUri = CHART_IMAGE_URL ? await downloadImageAsDataUri(CHART_IMAGE_URL) : null;
     const waterfall = chartImageDataUri ? null : buildWaterfallSeries(inputData, [
@@ -1375,7 +1375,7 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
 
     slide3.addText(curLabel, {
       x: CONFIG.slide3.tableX, y: 0.9, w: CONFIG.slide3.tableW, h: 0.25,
-      fontSize: 11, bold: true, color: CONFIG.colors.gray800, fontFace: CONFIG.fonts.primary, align: 'center',
+      fontSize: 12, bold: true, color: CONFIG.colors.gray800, fontFace: CONFIG.fonts.primary, align: 'center',
     });
 
     const tableData3 = [];
@@ -1410,7 +1410,7 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
     });
 
     // ---- Chart A: P&L current vs prior year (honest YoY, real values) ----
-    slide3.addText('Performance vs prior year (' + curLabel + ' vs ' + priorLabel + ')', {
+    slide3.addText('Performance vs prior year', {
       x: 0.5, y: 2.65, w: 3.3, h: 0.25, fontSize: 10, bold: true,
       color: CONFIG.colors.gray800, fontFace: CONFIG.fonts.primary,
     });
@@ -1423,13 +1423,13 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
       x: 0.4, y: 2.95, w: 3.35, h: 2.2,
       barDir: 'col', barGrouping: 'clustered',
       chartColors: [CONFIG.colors.primary, CONFIG.colors.gray500],
-      showLegend: true, legendPos: 'b', legendFontSize: 7,
+      showLegend: true, legendPos: 'b', legendFontSize: 8,
       valGridLine: { style: 'solid', color: CONFIG.charts.gridColor, size: 1 },
-      catAxisLabelFontSize: 8, valAxisLabelFontSize: 7,
+      catAxisLabelFontSize: 8, valAxisLabelFontSize: 8, valAxisLabelFormatCode: '#,##0,"k"',
     });
 
     // ---- Chart B: operating expense breakdown (real line items) ----
-    slide3.addText('Operating expense breakdown (' + curLabel + ')', {
+    slide3.addText('Operating expense breakdown', {
       x: 4.0, y: 2.65, w: 3.05, h: 0.25, fontSize: 10, bold: true,
       color: CONFIG.colors.gray800, fontFace: CONFIG.fonts.primary,
     });
@@ -1444,7 +1444,7 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
       chartColors: [CONFIG.colors.primary],
       showLegend: false,
       valGridLine: { style: 'solid', color: CONFIG.charts.gridColor, size: 1 },
-      catAxisLabelFontSize: 7, valAxisLabelFontSize: 6,
+      catAxisLabelFontSize: 8, valAxisLabelFontSize: 8, valAxisLabelFormatCode: '#,##0,"k"',
     });
 
     if (TW) addOpexDeepDiveSlide(pptx);
@@ -1452,7 +1452,7 @@ const currentPeriodShort = extractPeriodLabel(inputData.current_period_label);
     // ==================== SLIDE 4: BUDGET VS ACTUAL ====================
 	    const slide4 = pptx.addSlide();
 	    addSlideTitle(slide4, CONFIG.text.slide4Title);
-	    addSlideSubtitle(slide4, 'This slide displays P&L variance analysis to closely monitor key financial parameters of the company. It includes details about cost, discounts allowed, budget meeting, overtime finance charges, etc.');
+	    addSlideSubtitle(slide4, `Revenue by shop against budget for ${extractPeriodLabel(inputData.current_period_label)}, with variance commentary.`);
 
 slide4.addText('Amount in JPY', {
 	      x: CONFIG.layout.marginLeft,
@@ -1473,7 +1473,7 @@ slide4.addText('Amount in JPY', {
 	    tableData4.push([
 	      { text: 'Account No', options: { fontSize: 8, bold: true, fill: 'E4D4F4', fontFace: CONFIG.fonts.primary } },
 	      { text: 'Shop', options: { fontSize: 8, bold: true, fill: 'E4D4F4', fontFace: CONFIG.fonts.primary } },
-	      { text: 'Act MTh', options: { fontSize: 8, bold: true, fill: 'E4D4F4', fontFace: CONFIG.fonts.primary, align: 'right' } },
+	      { text: 'Actual', options: { fontSize: 8, bold: true, fill: 'E4D4F4', fontFace: CONFIG.fonts.primary, align: 'right' } },
 	      { text: 'Budget', options: { fontSize: 8, bold: true, fill: 'E4D4F4', fontFace: CONFIG.fonts.primary, align: 'right' } },
 	      { text: 'Var', options: { fontSize: 8, bold: true, fill: 'E4D4F4', fontFace: CONFIG.fonts.primary, align: 'right' } },
 	      { text: 'Var%', options: { fontSize: 8, bold: true, fill: 'E4D4F4', fontFace: CONFIG.fonts.primary, align: 'right' } },
@@ -1482,7 +1482,7 @@ slide4.addText('Amount in JPY', {
 
 	    // Revenue section header
 	    tableData4.push([
-	      { text: 'Revenue', options: { fontSize: 9, bold: true, fill: CONFIG.colors.primary, color: CONFIG.colors.white, fontFace: CONFIG.fonts.primary, colspan: 7 } },
+	      { text: 'Revenue', options: { fontSize: 10, bold: true, fill: CONFIG.colors.primary, color: CONFIG.colors.white, fontFace: CONFIG.fonts.primary, colspan: 7 } },
 	      { text: '', options: { fill: CONFIG.colors.primary } },
 	      { text: '', options: { fill: CONFIG.colors.primary } },
 	      { text: '', options: { fill: CONFIG.colors.primary } },
@@ -1523,7 +1523,7 @@ slide4.addText('Amount in JPY', {
 	        { text: formatCurrency(budget), options: { fontSize: 8, fontFace: CONFIG.fonts.primary, align: 'right' } },
 	        { text: formatCurrency(variance), options: { fontSize: 8, fontFace: CONFIG.fonts.primary, align: 'right', color: varColor } },
 	        { text: varArrow + ' ' + variancePct + '%', options: { fontSize: 8, fontFace: CONFIG.fonts.primary, align: 'right', color: varColor } },
-	        { text: explanation, options: { fontSize: 7, fontFace: CONFIG.fonts.primary, color: CONFIG.colors.gray500 } },
+	        { text: explanation, options: { fontSize: 8, fontFace: CONFIG.fonts.primary, color: CONFIG.colors.gray500 } },
 	      ]);
 	    });
 
@@ -1536,7 +1536,6 @@ slide4.addText('Amount in JPY', {
 
 	    tableData4.push([
 	      { text: 'Total Revenue', options: { fontSize: 8, bold: true, fill: CONFIG.colors.gray100, fontFace: CONFIG.fonts.primary, colspan: 2 } },
-	      { text: '', options: { fill: CONFIG.colors.gray100 } },
 	      { text: formatCurrency(inputData.revenue.current), options: { fontSize: 8, bold: true, fill: CONFIG.colors.gray100, fontFace: CONFIG.fonts.primary, align: 'right' } },
 	      { text: formatCurrency(budgetRevTotal), options: { fontSize: 8, bold: true, fill: CONFIG.colors.gray100, fontFace: CONFIG.fonts.primary, align: 'right' } },
 	      { text: formatCurrency(revVar), options: { fontSize: 8, bold: true, fill: CONFIG.colors.gray100, fontFace: CONFIG.fonts.primary, align: 'right', color: revVarColor } },
@@ -1744,7 +1743,7 @@ app.get('/d/:id/:filename', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', version: 'three-way-1', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', version: 'three-way-2', timestamp: new Date().toISOString() });
 });
 
 // Web front end (config + run-workflow UI), served at the root.
