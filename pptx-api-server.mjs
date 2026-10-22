@@ -11,6 +11,15 @@ import { Buffer } from 'buffer';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// The company part of the deck's file name: keeps Japanese and other letters (before: everything but a-z0-9 became "_",
+// so 「サンプル商事株式会社」 gave "___________"); replaces only what file systems reject, spaces and controls; max 80 chars.
+export function safeFilePart(name) {
+  const s = String(name == null ? '' : name).normalize('NFC')
+    .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '_').replace(/\s+/g, '_')
+    .replace(/_+/g, '_').replace(/^[_.]+|[_.]+$/g, '').slice(0, 80);
+  return s || 'Company';
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
@@ -1656,8 +1665,7 @@ slide4.addText(t('Amount in JPY', '単位：円'), {
     let pptxBase64 = await pptx.write('base64');
     if (usedNativeWaterfall) pptxBase64 = await patchWaterfallCharts(pptxBase64, usedNativeWaterfall.deltaLabels, CONFIG.fonts.primary);
     pptxBase64 = await applyEastAsianFont(pptxBase64, JA);
-    const safeCompany = String(inputData.company_name || 'Company');
-    const filename = `${CONFIG.metadata.filenamePrefix}_${safeCompany.replace(/[^a-z0-9]/gi, '_')}.pptx`;
+    const filename = `${CONFIG.metadata.filenamePrefix}_${safeFilePart(inputData.company_name)}.pptx`;
     
     return { filename, pptx_base64: pptxBase64 };
 
@@ -1796,7 +1804,7 @@ app.get('/d/:id/:filename', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', version: 'bilingual-2', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', version: 'bilingual-3', timestamp: new Date().toISOString() });
 });
 
 // Web front end (config + run-workflow UI), served at the root.
