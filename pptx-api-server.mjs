@@ -1,5 +1,4 @@
 import express from 'express';
-import cors from 'cors';
 import PptxGenJS from 'pptxgenjs';
 import axios from 'axios';
 import fs from 'fs';
@@ -21,23 +20,51 @@ export function safeFilePart(name) {
 }
 
 const app = express();
-app.use(cors());
-app.use(express.json({ limit: '50mb' }));
+app.disable('x-powered-by');
+// Security headers (2026-10-23 security review). No CORS by default: n8n calls this server from its own server, and
+// browsers only open /d/<id>/<file> links. CORS_ORIGINS="https://a,https://b" allows those origins only.
+const CORS_ORIGINS = String(process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+app.use((req, res, next) => {
+  res.set({ 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer',
+    'Strict-Transport-Security': 'max-age=31536000', 'Cache-Control': 'no-store' });
+  const o = req.headers.origin;
+  if (o && CORS_ORIGINS.includes(o)) res.set({ 'Access-Control-Allow-Origin': o, 'Access-Control-Allow-Headers': 'Authorization, Content-Type', Vary: 'Origin' });
+  if (req.method === 'OPTIONS') return res.sendStatus(o && CORS_ORIGINS.includes(o) ? 204 : 403);
+  next();
+});
+app.use(express.json({ limit: '10mb' }));
 
-// Optional bearer-token auth. If RENDER_TOKEN is set (recommended when the
-// server is publicly reachable, e.g. on Easypanel), /generate-pptx and
-// /download require it — via `Authorization: Bearer <token>` or `?token=`.
-// /health stays open. When RENDER_TOKEN is unset (local use), auth is off.
-// GET /d/<id>/<file> download links are open too: the 128-bit random id is the
-// capability, so the master token never ends up in a link shown to users.
+// Bearer-token auth (2026-10-23 security review): RENDER_TOKEN is REQUIRED — the server refuses to start without it,
+// unless ALLOW_NO_TOKEN=1 is set for local development. Only the Authorization header is accepted (no ?token=, which
+// ends up in links, browser history and proxy logs), compared in constant time. /health and GET / stay open.
+// GET /d/<id>/<file> download links are open too: the 128-bit random id is the capability.
 const RENDER_TOKEN = process.env.RENDER_TOKEN || '';
+if (!RENDER_TOKEN && process.env.ALLOW_NO_TOKEN !== '1') {
+  console.error('RENDER_TOKEN is not set — refusing to start (set ALLOW_NO_TOKEN=1 for local development only).');
+  process.exit(1);
+}
+const tokenOk = (auth) => {
+  const a = Buffer.from(String(auth || '')), b = Buffer.from('Bearer ' + RENDER_TOKEN);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+};
 app.use((req, res, next) => {
   if (!RENDER_TOKEN || req.path === '/health' || (req.method === 'GET' && req.path === '/')) return next();
   if (req.method === 'GET' && req.path.startsWith('/d/')) return next();
-  const auth = req.headers.authorization || '';
-  if (auth === 'Bearer ' + RENDER_TOKEN || req.query.token === RENDER_TOKEN) return next();
+  if (tokenOk(req.headers.authorization)) return next();
   return res.status(401).json({ success: false, error: 'unauthorized' });
 });
+
+// Images (cover / chart) — 2026-10-23 security review: never read local files, fetch only https from allowed hosts
+// (IMAGE_HOSTS, default fal.media and its subdomains, where fal.ai serves generated images), no redirects, max 15 MB,
+// image types only. data:image/... URIs are accepted as they are. Anything else → no image (the deck is still built).
+const IMAGE_HOSTS = String(process.env.IMAGE_HOSTS || 'fal.media').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+export function imageUrlAllowed(u) {
+  let url; try { url = new URL(String(u)); } catch { return false; }
+  if (url.protocol !== 'https:' || url.username || url.password || (url.port && url.port !== '443')) return false;
+  const h = url.hostname.toLowerCase();
+  return IMAGE_HOSTS.some(d => h === d || h.endsWith('.' + d));
+}
 
 const PORT = process.env.PORT || 3456;
 const OUTPUT_DIR = path.join(__dirname, 'output');
@@ -55,6 +82,10 @@ const DOWNLOAD_TTL_MS = Number(process.env.DOWNLOAD_TTL_HOURS || 24) * 3600 * 10
 fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
 
 function purgeExpiredDownloads() {
+  for (const f of fs.readdirSync(OUTPUT_DIR)) {   // legacy-mode decks in output/ expire the same way (they used to stay forever)
+    const fp = path.join(OUTPUT_DIR, f);
+    try { const st = fs.statSync(fp); if (st.isFile() && Date.now() - st.mtimeMs > DOWNLOAD_TTL_MS) fs.rmSync(fp, { force: true }); } catch { /* gone */ }
+  }
   for (const id of fs.readdirSync(DOWNLOAD_DIR)) {
     const dir = path.join(DOWNLOAD_DIR, id);
     try {
@@ -62,6 +93,7 @@ function purgeExpiredDownloads() {
     } catch { /* already gone */ }
   }
 }
+purgeExpiredDownloads();
 setInterval(purgeExpiredDownloads, 3600 * 1000).unref();
 
 
@@ -238,7 +270,7 @@ function buildWaterfallSeries(d, periods, names = ['Revenue', 'COGS', 'Gross Pro
 // pptxgenjs cannot hide one series or format labels per series, so patch the chart XML:
 // spacer -> no fill + no labels; totals -> white labels; deltas -> dark labels, "−" prefix on decreases.
 async function patchWaterfallCharts(pptxBase64, deltaLabels, fontFace) {
-  const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const spacerLabels = deltaLabels
     .map((text, idx) => (text === null ? '' : `<c:dLbl><c:idx val="${idx}"/><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" sz="800"><a:solidFill><a:srgbClr val="1F2937"/></a:solidFill><a:latin typeface="${esc(fontFace)}"/></a:rPr><a:t>${esc(text)}</a:t></a:r></a:p></c:rich></c:tx><c:dLblPos val="inEnd"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbl>`))
     .join('');
@@ -466,7 +498,7 @@ async function generatePresentation(config) {
     metadata: {
       layout: slideConfig.pptx_layout || 'LAYOUT_16x9',
       author: slideConfig.pptx_author || 'Financial Reporting System',
-      filenamePrefix: slideConfig.filename_prefix || 'Financial_Metrics'
+      filenamePrefix: safeFilePart(slideConfig.filename_prefix || 'Financial_Metrics')
     }
   };
 
@@ -519,24 +551,21 @@ async function generatePresentation(config) {
 	const COVER_IMAGE_URL = coverImageUrl || pptxConfig?.cover_image_url || pptxConfig?.coverImageUrl || null;
 	const CHART_IMAGE_URL = chartImageUrl || pptxConfig?.chart_image_url || pptxConfig?.chartImageUrl || null;
 
-  async function downloadImageAsDataUri(urlOrPath) {
-    if (!urlOrPath || urlOrPath === '') return null;
-    if (urlOrPath.startsWith('http://') || urlOrPath.startsWith('https://')) {
-      try {
-        const response = await axios.get(urlOrPath, { responseType: 'arraybuffer', timeout: 30000 });
-        const mime = response.headers['content-type'] || 'image/png';
-        return `data:${mime};base64,${Buffer.from(response.data).toString('base64')}`;
-      } catch (e) { 
-        console.error('Failed to download image:', urlOrPath, e.message);
-        return null; 
-      }
-    }
+  async function downloadImageAsDataUri(url) {
+    if (!url) return null;
+    const s = String(url);
+    const m = s.match(/^data:(image\/(?:png|jpeg|webp|gif));base64,[A-Za-z0-9+/=]+$/);
+    if (m) return s.length <= 20e6 ? s : null;
+    if (!imageUrlAllowed(s)) { console.warn('[IMG] not an allowed image address, skipped'); return null; }
     try {
-      if (!fs.existsSync(urlOrPath)) return null;
-      const ext = path.extname(urlOrPath).toLowerCase().replace(".", "");
-      const mime = ext === "jpg" || ext === "jpeg" ? "image/jpeg" : ext === "webp" ? "image/webp" : "image/png";
-      return `data:${mime};base64,${fs.readFileSync(urlOrPath).toString("base64")}`;
-    } catch (e) { return null; }
+      const response = await axios.get(s, { responseType: 'arraybuffer', timeout: 30000, maxRedirects: 0, maxContentLength: 15e6, maxBodyLength: 15e6, proxy: false });
+      const mime = String(response.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+      if (!IMAGE_TYPES.includes(mime)) { console.warn('[IMG] not an image type, skipped:', mime); return null; }
+      return `data:${mime};base64,${Buffer.from(response.data).toString('base64')}`;
+    } catch (e) {
+      console.error('Failed to download image:', e.message);
+      return null;
+    }
   }
 
   function svgToDataUriCover(svg) {
@@ -1741,7 +1770,7 @@ app.post('/generate-pptx', async (req, res) => {
       });
     }
 
-    const outPath = path.join(OUTPUT_DIR, result.filename);
+    const outPath = path.join(OUTPUT_DIR, path.basename(result.filename));
     fs.writeFileSync(outPath, buf);
 
     console.log(`[OK] wrote ${outPath} (${buf.length} bytes)`);
@@ -1766,16 +1795,12 @@ app.post('/generate-pptx', async (req, res) => {
     // limit. The file is saved to disk and fetchable via download_url; callers
     // that want the bytes can pass ?include_base64=1.
     const wantBase64 = req.query.include_base64 === '1' || req.query.include_base64 === 'true';
-    // Absolute download URL (behind Easypanel's proxy the public scheme/host
-    // arrive in X-Forwarded-*). Include the token so the link works when
-    // clicked as-is — the caller already holds the token to reach this route.
-    const tokenQs = RENDER_TOKEN ? `?token=${encodeURIComponent(RENDER_TOKEN)}` : '';
+    // Download URL of the legacy mode: needs the Authorization header (the token is never put into a link).
     res.json({
       success: true,
-      filename: result.filename,
-      filepath: outPath,
+      filename: path.basename(outPath),
       file_size_bytes: buf.length,
-      download_url: `${publicBase}/download/${encodeURIComponent(result.filename)}${tokenQs}`,
+      download_url: `${publicBase}/download/${encodeURIComponent(path.basename(outPath))}`,
       ...(wantBase64 ? { pptx_base64: result.pptx_base64 } : {}),
     });
   } catch (error) {
@@ -1804,7 +1829,7 @@ app.get('/d/:id/:filename', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', version: 'bilingual-3', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', version: 'bilingual-3-sec1', timestamp: new Date().toISOString() });
 });
 
 // Web front end (config + run-workflow UI), served at the root.
